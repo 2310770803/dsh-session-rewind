@@ -21,6 +21,7 @@ export const CANDIDATES_PATH = '/api/session-rewind.candidates';
 export const INPLACE_PATH = '/api/session-rewind.inplace';
 export const CUTS_PATH = '/api/session-rewind.cuts';
 export const DIAGNOSE_PATH = '/api/session-rewind.diagnose';
+export const TAIL_PATH = '/api/session-rewind.tail';
 export const SELFCHECK_PATH = '/api/session-rewind.selfcheck';
 
 /** A rewind request is a session id plus a Turn number or a seq. */
@@ -196,6 +197,77 @@ function targetOf(value) {
     throw new RequestBoundaryError(400, 'turn or seq is required');
   }
   return { sessionId, turn, seq };
+}
+
+/**
+ * Build the event-tail route.
+ *
+ * Returns the last N events of a Session in reading order with just enough shape
+ * to reason about a rewind: seq, type, source kind and a short text sample. It is
+ * the only way to see whether a marker actually landed, because the on-disk log is
+ * compressed and may lag behind the live surface.
+ *
+ * @param {{
+ *   events: (sessionId: string) => Promise<readonly unknown[]>,
+ *   trustedHosts?: () => readonly string[],
+ *   onError?: (error: unknown) => void,
+ * }} options
+ * @returns {(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => Promise<void>}
+ */
+export function createTailHandler({ events, trustedHosts = () => [], onError = () => {} }) {
+  return async (request, response) => {
+    try {
+      if (request.method !== 'POST') {
+        writeText(response, 405, 'method not allowed');
+        return;
+      }
+      if (!isTrustedRequest(request, hostsOf(trustedHosts))) {
+        writeText(response, 403, 'forbidden');
+        return;
+      }
+      const mediaType = header(request.headers, 'content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+      if (mediaType !== 'application/json') {
+        writeText(response, 415, 'content type must be application/json');
+        return;
+      }
+      const value = await readJsonBody(request);
+      if (!isRecord(value)) throw new RequestBoundaryError(400, 'request body must be a JSON object');
+      const sessionId = typeof value.sessionId === 'string' ? value.sessionId : '';
+      if (sessionId === '') throw new RequestBoundaryError(400, 'sessionId is required');
+      const limit = Number.isInteger(value.limit) && value.limit > 0 && value.limit <= 300 ? value.limit : 40;
+      const all = await events(sessionId);
+      const slice = all.slice(-limit);
+      writeJson(response, 200, {
+        ok: true,
+        total: all.length,
+        events: slice.map((event) => summarizeEvent(event)),
+      });
+    } catch (error) {
+      fail(response, error, onError);
+    }
+  };
+}
+
+/**
+ * Reduce one Session event to the fields worth inspecting.
+ *
+ * @param {unknown} event
+ * @returns {{ seq: number | null, type: string, sourceKind: string | null, role: string | null, text: string | null }}
+ */
+function summarizeEvent(event) {
+  const record = isRecord(event) ? event : {};
+  const data = isRecord(record.data) ? record.data : {};
+  const source = isRecord(data.source) ? data.source : {};
+  const content = Array.isArray(data.content) ? data.content : [];
+  const first = content.find((part) => isRecord(part) && part.type === 'text');
+  const text = isRecord(first) && typeof first.text === 'string' ? first.text.slice(0, 60) : null;
+  return {
+    seq: Number.isInteger(record.seq) ? record.seq : null,
+    type: typeof record.type === 'string' ? record.type : '(none)',
+    sourceKind: typeof source.kind === 'string' ? source.kind : null,
+    role: typeof data.role === 'string' ? data.role : null,
+    text,
+  };
 }
 
 /**

@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-01
+
+**修复：回退后"被撤回的对话"没有从界面上消失。**
+
+### 修复
+
+- 隐藏规则从「turn ≥ 起始轮」改为 **Host 精确计算的被撤回轮次集合**（`hiddenTurns`）：
+  取 `[surfaceOp.startSeq, markerSeq)` 这段事件跨过的轮次。旧规则会连"回退之后你新发的消息"一起藏掉。
+- 隐藏改用属性 `data-session-rewind-hidden` + 样式表里的 `display:none !important`，不再写内联
+  `style`——Chat 重渲染会丢掉内联覆盖，这正是之前隐藏"算出来了却不生效"的原因。
+- `/api/session-rewind.cuts` 与就地回退的响应都带上 `hiddenTurns`，刷新页面后仍能恢复隐藏状态。
+- 新增 `/api/session-rewind.tail`：返回会话最近 N 条事件（seq / type / source.kind / 文本片段），
+  用于在看不到页面的情况下确认 marker 是否真的落库。
+
+
 ## [1.2.8] - 2026-11-01
 
 **首个由 CI 通过 OIDC Trusted Publishing 发布的版本（带 provenance）。**

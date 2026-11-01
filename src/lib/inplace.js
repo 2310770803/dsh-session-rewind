@@ -10,7 +10,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { hiddenFromSeq, markerPayload, planInPlace, textOf } from './surface.js';
+import { hiddenFromSeq, markerPayload, planInPlace, textOf, withdrawnTurns } from './surface.js';
 
 /** Waiting budget for a cancelled Turn to reach quiescence. */
 const IDLE_TIMEOUT_MS = 20_000;
@@ -128,7 +128,14 @@ export function describeInPlace(session, seq) {
  *   hiddenFromSeq: number | null, restore?: object,
  * }>}
  */
-export async function executeInPlace({ ctx, sessionId, seq, restoreTurns, timeoutMs = IDLE_TIMEOUT_MS }) {
+export async function executeInPlace({
+  ctx,
+  sessionId,
+  seq,
+  restoreTurns,
+  readEvents,
+  timeoutMs = IDLE_TIMEOUT_MS,
+}) {
   const agent = liveAgentOf(ctx, sessionId);
   if (agent === undefined) {
     const error = new Error('this session is not live, so it cannot be rewound in place');
@@ -192,12 +199,21 @@ export async function executeInPlace({ ctx, sessionId, seq, restoreTurns, timeou
     hidden = plan.surfaceStart;
   }
 
+  let hiddenTurns = [];
+  try {
+    const after = typeof readEvents === 'function' ? await readEvents(sessionId) : [];
+    hiddenTurns = [...withdrawnTurns(after)];
+  } catch {
+    /* the cut still applied; the client falls back to hiding from plan.turn */
+  }
+
   return {
     markerSeq: typeof event?.seq === 'number' ? event.seq : -1,
     targetSeq: plan.targetSeq,
     prompt: plan.prompt,
     turn: plan.turn,
     hiddenFromSeq: hidden,
+    hiddenTurns,
     ...(restore === undefined ? {} : { restore }),
   };
 }

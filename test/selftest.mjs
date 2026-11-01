@@ -20,6 +20,7 @@ import {
   listCandidates,
   markerPayload,
   planInPlace,
+  withdrawnTurns,
 } from '../src/lib/surface.js';
 
 const events = [
@@ -94,6 +95,26 @@ assert.match(payload.id, /^id:session-rewind-\d+$/u);
 assert.equal(payload.content[0].text, MARKER_TEXT);
 assert.notEqual(payload.content[0].text, '');
 assert.deepEqual(payload.source, { kind: MARKER_SOURCE_KIND });
+
+// --- withdrawn turns ------------------------------------------------------
+// A rewind at seq 7 withdraws turns 1-2 up to the marker; turn 3 starts after it
+// and must stay visible.
+{
+  const rewound = [
+    { seq: 0, type: 'session', data: {} },
+    { seq: 1, type: 'turn/start', data: { turn: 1 } },
+    { seq: 2, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'one' }] } },
+    { seq: 5, type: 'turn/end', data: { turn: 1 } },
+    { seq: 6, type: 'turn/start', data: { turn: 2 } },
+    { seq: 7, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'two' }] } },
+    { seq: 9, type: 'turn/end', data: { turn: 2 } },
+    { seq: 10, type: 'user/message', data: { source: { kind: MARKER_SOURCE_KIND } }, surfaceOp: { op: 'replace', startSeq: 7, endSeq: 9 } },
+    { seq: 11, type: 'turn/start', data: { turn: 3 } },
+    { seq: 12, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'three' }] } },
+  ];
+  assert.deepEqual(withdrawnTurns(rewound), [2]);
+  assert.deepEqual(withdrawnTurns(events), []);
+}
 
 // --- archive -------------------------------------------------------------
 const root = await mkdtemp(join(tmpdir(), 'rewind-test-'));

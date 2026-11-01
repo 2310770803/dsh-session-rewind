@@ -29,6 +29,7 @@ import {
   CUTS_PATH,
   DIAGNOSE_PATH,
   INPLACE_PATH,
+  TAIL_PATH,
   PLAN_PATH,
   RESTORE_PATH,
   SELFCHECK_PATH,
@@ -36,12 +37,13 @@ import {
   createCutsHandler,
   createDiagnoseHandler,
   createInplaceHandler,
+  createTailHandler,
   createPlanHandler,
   createRestoreHandler,
   createSelfcheckHandler,
 } from './lib/route.js';
 import { describeInPlace, executeInPlace, liveAgentOf } from './lib/inplace.js';
-import { hiddenFromSeq, hiddenFromTurn } from './lib/surface.js';
+import { hiddenFromSeq, hiddenFromTurn, withdrawnTurns } from './lib/surface.js';
 
 export const name = 'session-rewind';
 
@@ -473,12 +475,17 @@ export function apply(ctx) {
         restoreTurns: restoreFiles === true
           ? async (fromTurn) => restoreTurns(sessionId, fromTurn)
           : undefined,
+        readEvents: (id) => readEvents(ctx, id),
       });
 
       const cutsOf = async (sessionId) => {
         // Read the durable log: the client needs the cut after a page reload too.
         const events = await readEvents(ctx, sessionId);
-        return { hiddenFromSeq: hiddenFromSeq(events), hiddenFromTurn: hiddenFromTurn(events) };
+        return {
+          hiddenFromSeq: hiddenFromSeq(events),
+          hiddenFromTurn: hiddenFromTurn(events),
+          hiddenTurns: withdrawnTurns(events),
+        };
       };
 
       /**
@@ -588,7 +595,7 @@ export function apply(ctx) {
             plugin: 'dsh-session-rewind',
             archive: { directory: archive.directory, ...archiveStats },
             client: { discovered: clientPath !== null, path: clientPath },
-            routes: [SELFCHECK_PATH, DIAGNOSE_PATH, CANDIDATES_PATH, INPLACE_PATH, CUTS_PATH, PLAN_PATH, RESTORE_PATH],
+            routes: [SELFCHECK_PATH, DIAGNOSE_PATH, TAIL_PATH, CANDIDATES_PATH, INPLACE_PATH, CUTS_PATH, PLAN_PATH, RESTORE_PATH],
           };
         },
         trustedHosts,
@@ -622,6 +629,12 @@ export function apply(ctx) {
         onError,
       });
 
+      const tailHandler = createTailHandler({
+        events: async (sessionId) => readEvents(ctx, sessionId),
+        trustedHosts,
+        onError,
+      });
+
       const cutsHandler = createCutsHandler({
         cutsOf,
         trustedHosts,
@@ -636,6 +649,10 @@ export function apply(ctx) {
         scope.effect(
           () => scope.webServer.register({ kind: 'exact', path: SELFCHECK_PATH, handler: statusHandler }),
           'session-rewind: selfcheck route',
+        );
+        scope.effect(
+          () => scope.webServer.register({ kind: 'exact', path: TAIL_PATH, handler: tailHandler }),
+          'session-rewind: tail route',
         );
         scope.effect(
           () => scope.webServer.register({ kind: 'exact', path: CANDIDATES_PATH, handler: candidatesHandler }),
