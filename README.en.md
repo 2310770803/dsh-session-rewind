@@ -60,6 +60,17 @@ can install `dsh-rewind-plugin` separately; the two do not conflict.
 
 ## Install
 
+**Install from the plugin market (recommended):** **Plugins → Discover** →
+**Index sources** → add
+`https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/index.json`
+→ search `rewind` or `Session Rewind` → install. The index format and the release
+process are documented in [docs/publishing.md](docs/publishing.md).
+
+This machine (profile `desktop`) already has that index source written into
+`cordis.patch.yml`, so opening Discover shows the entry.
+
+**Install from the source directory** (what this machine currently does):
+
 ```js
 // plugin_manager
 { action: 'install_bundle', target: 'E:\\\\DeepSeek Harness\\\\dsh-session-rewind' }

@@ -13,7 +13,8 @@ npm 上没有发布这个包（本机 `npm whoami` 返回 401，没有 npm 凭�
 - 它的版本条目里写的是 `source: { type: "git", url, commit }`，**commit 固定到 40 位 SHA**，
   不是分支；
 - DSH 的 **插件 → 发现（Discover）** 标签页和 `plugin_market` 智能体工具都会读它；
-- 索引本身通过 jsDelivr 的 GitHub 分支镜像分发，所以安装时既不需要 npm，也不需要本地构建。
+- 索引本身是仓库根目录的一份 ~2 KB JSON，通过 GitHub raw 文件（或钉到标签的 jsDelivr CDN）分发，
+  所以安装时既不需要 npm，也不需要本地构建。
 
 用户要添加的索引源就是：
 
@@ -47,7 +48,7 @@ https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/index.json
 ### 换一台机器时手动加
 
 1. 打开左侧 **插件 → 发现（Discover）**。
-2. 点 **索引源（Index sources）** → **添加索引源**，粘贴上面的 jsDelivr URL。
+2. 点 **索引源（Index sources）** → **添加索引源**，粘贴上面推荐的索引源 URL。
 3. 搜索 `rewind` 或 `会话回退`，打开条目，点 **安装**。
 
 如果这台机器上的「发现」标签页不存在，说明实验性插件市场没启用。它随 DSH 一起发布但
@@ -175,7 +176,7 @@ node scripts/build-index.mjs --dry-run          # 只把文档打到 stdout，�
 
 ## 4. 发布流程
 
-当前版本是 `1.1.0`。一次发布按下面的顺序做，**两个提交一次 push**：
+当前版本是 `1.1.1`。一次发布按下面的顺序做，**两个提交一次 push**：
 
 1. **改版本、写更新日志。** 把 `package.json` 的 `version` 改成 `x.y.z`，并在
    `CHANGELOG.md` 里写一个 `## [x.y.z] - YYYY-MM-DD` 小节（发布工作流会抽取它当
@@ -191,20 +192,19 @@ node scripts/build-index.mjs --dry-run          # 只把文档打到 stdout，�
 5. **一次 push，再打标签。**
    ```sh
    git push origin main          # 一次 push 带 X 和 Y，CI 只看 Y，直接是绿的
-   git tag v1.1.0
-   git push origin v1.1.0
+   git tag v1.1.1
+   git push origin v1.1.1
    ```
    > 如果分成两次 push，push X 时 CI 会短暂报红：`--check` 要求
    > `index.json` 与 `package.json` 一致，而 X 还没有新索引。这是预期行为。
 
 打标签后 `.github/workflows/publish.yml` 会自动：
 
-- 校验标签 `v1.1.0` 与 `package.json` 的 `version` 一致，并且 **tag 提交就是
+- 校验标签 `v1.1.1` 与 `package.json` 的 `version` 一致，并且 **tag 提交就是
   `main` 当前指向的提交**（因为下一步要往 `main` 推索引；发布一律从 `main` HEAD 切）；
 - 再跑三个测试套件；
 - 按 tag 提交重新生成 `index.json`（固定到该提交），并用 `--check` 证明它就是生成器的输出；
-- 把刷新后的 `index.json` 提交回 `main` —— 这一步才是让 jsDelivr
-  `@main/index.json` 真正更新的动作；
+- 把刷新后的 `index.json` 提交回 `main` —— 这一步才是让分支索引真正更新的动作；
 - 用 `CHANGELOG.md` 的对应小节创建 GitHub Release，并附上两个**文件名不带版本号**的资产：
   `index.json` 与 `dsh-session-rewind.tgz`（`npm pack` 离线打包，无依赖、无构建）。
 
@@ -216,24 +216,28 @@ node scripts/build-index.mjs --dry-run          # 只把文档打到 stdout，�
 
 ### 本仓库的现状（2026-11-01 实测）
 
-- `v1.1.0` 已发布：<https://github.com/2310770803/dsh-session-rewind/releases/tag/v1.1.0>，
-  资产有 `index.json`（sha256 `8bc2cfc7…b5bd`）与 `dsh-session-rewind.tgz`；
-- `main` 的索引提交由发布工作流推回（提交信息 `chore(index): regenerate for v1.1.0`），
-  索引固定到 `dd76efc22ed01b0b64d71b02cc92a08f5cdafba9`；
-- Release 工作流全绿（run `41265021487`，含测试、重新生成、`--check`、建 Release、上传资产）；
-- 索引源 URL 现在返回 `200`，并用宿主校验器 `parseMarketIndex` 解析通过，安装参数为
-  `git+https://github.com/2310770803/dsh-session-rewind.git#dd76efc…`；
-- jsDelivr 第一次读到的仍是旧缓存（固定 `bd98ec9`），执行一次 purge 之后就与
-  Release 资产逐字节一致了——这就是下面第 1 步存在的原因。
+- 最新发布是 `v1.1.1`（上一版 `v1.1.0`）：<https://github.com/2310770803/dsh-session-rewind/releases>；
+  Release 资产是 `index.json`（sha256 `446b1a31…70b4`）与 `dsh-session-rewind.tgz`；
+- 发布工作流把索引提交推回 `main`（`bb347da`，提交信息 `chore(index): regenerate for v1.1.1`），
+  索引固定到 tag 提交 `d10b1f717c35290bd23e082cdf6304a9f913369e`（`package.json` 版本 `1.1.1`）；
+- 两次 Release run（`41265021487` 对应 v1.1.0、`41265207164` 对应 v1.1.1）与对应的
+  CI run 都是 success，步骤包含测试、重新生成、`--check`、建 Release、上传资产；
+- 索引用宿主校验器 `parseMarketIndex` 解析通过，安装参数为
+  `git+https://github.com/2310770803/dsh-session-rewind.git#d10b1f7…`；
+- **缓存是分层的**：raw 侧也有 CDN 缓存（通常几分钟，本次实测是立即可见）；jsDelivr 的 gh
+  分支缓存 `s-maxage` 是 12 小时，`purge.jsdelivr.net` 也不一定立刻清掉（实测 `@main`
+  仍返回旧文档，而 `@v1.1.1` 立刻是新的）。所以本机 profile 配的是 raw 地址；
+  用 CDN 就钉到标签。
 
 ### 发布之后要确认的事
 
-1. jsDelivr 是否已经返回新内容：
+1. 先确认 raw 已经是最新（本机 profile 配的就是它）：
    ```sh
    curl -s https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/index.json
    ```
-   没更新就去点一次
-   `https://purge.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json`。
+   看 `plugins[0].versions[0].source.commit` 是否等于新 tag 的提交。用 CDN 索引源时还要
+   轮询 `https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@<tag>/index.json`；
+   `@main` 形式会滞后，必要时 purge 后继续等，别把旧文档当成新文档。
 2. DSH 自己还有 **10 分钟**的索引缓存（`cacheTtlMs` 默认 `600000`）。在「发现」里
    重新打开插件市场或刷新页面即可；带 `refresh` 的查询会绕过缓存。
 3. 装一遍验证：在「发现」里点安装，或者直接给 `plugin_manager`：
