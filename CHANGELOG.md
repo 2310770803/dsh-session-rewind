@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+## [1.2.8] - 2026-11-01
+
+**首个由 CI 通过 OIDC Trusted Publishing 发布的版本（带 provenance）。**
+
+1.2.7 已先行发布到 npm，但那次是本地 `npm publish`，没有来源证明；本版用于验证
+GitHub Actions + OIDC 的发布链路，`npm publish --provenance` 会自动附加可核对的构建来源。
+
+
 ## [1.2.7] - 2026-11-01
 
 **首个发布到 npm 的版本（Trusted Publishing / OIDC，无令牌）。**
