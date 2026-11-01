@@ -175,3 +175,54 @@ jobs:
           echo "https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json"
           echo "If Discover still serves an older document, purge the CDN copy:"
           echo "https://purge.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json"
+
+  npm:
+    # Publishes through Trusted Publishing (OIDC) — never a stored token.
+    #
+    # One manual prerequisite, done once on npmjs.com:
+    #   package settings -> Trusted Publisher -> GitHub,
+    #   Repository: 2310770803/dsh-session-rewind, Workflow: publish.yml
+    # (npm accepts a "pending publisher" for a name that is not published yet.)
+    # Until then this job stays skipped, so the release keeps working through the
+    # tarball; flip the repository variable once the publisher exists:
+    #   gh variable set NPM_TRUSTED_PUBLISHING --body true
+    if: startsWith(github.ref, 'refs/tags/v') && vars.NPM_TRUSTED_PUBLISHING == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Assert the npm CLI supports trusted publishing
+        run: |
+          installed="$(npm --version)"
+          echo "npm $installed"
+          node -e '
+            const parts = process.env.npm_config_version ?? process.argv[1];
+            const [major, minor, patch] = String(parts).split(".").map(Number);
+            const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!ok) { console.error(`npm ${parts} is too old: trusted publishing needs >= 11.5.1 (Node 24 ships it, Node 20 does not)`); process.exit(1); }
+          ' "$installed"
+
+      - name: Skip a version that is already on the registry
+        id: probe
+        run: |
+          name="$(node -p 'require("./package.json").name')"
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${name}@${version} is already published; nothing to do"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish
+        if: steps.probe.outputs.skip == 'false'
+        run: npm publish --access public --provenance

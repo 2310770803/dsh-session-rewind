@@ -8,6 +8,23 @@
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-11-01
+
+**发布链路：目录用的位图图标、两个自检脚本、npm Trusted Publishing 任务。**
+
+### 新增
+
+- `assets/icon-180.png`（180×180 位图）：社区目录只接受 GitHub 托管的 png/jpg/webp，
+  SVG 会被拒；这个文件用于目录条目的 `icon:`。
+- `scripts/check-package.mjs`：对照 DSH 插件契约自检（`dsh.bundle` / `dsh.client` / exports /
+  locale meta / 图标体积 / 对等依赖区间 / 客户端 IIFE / 误用 `primitives.Button` / 残留旧包名）。
+- `scripts/check-stylesheet.mjs`：CSS 藏在 JS 字符串里，`node --check` 看不出括号错位；这个脚本
+  断言括号配平、规则不嵌套、客户端用到的每个 class 都有对应规则。
+- `.github/workflows/publish.yml` 增加 `npm` 任务：OIDC Trusted Publishing（`id-token: write`）、
+  Node 24、断言 npm ≥ 11.5.1、已发布的版本自动跳过；由仓库变量 `NPM_TRUSTED_PUBLISHING`
+  控制，未配置前保持跳过，不影响现有 Release。
+
+
 ## [1.2.5] - 2026-11-01
 
 **修复：新发出的消息也会立即挂上 ↶。**
