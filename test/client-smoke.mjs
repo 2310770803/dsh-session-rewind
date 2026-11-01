@@ -182,13 +182,13 @@ const context = {
   },
 };
 clientModule.apply(context);
-assert.equal(registrations.length, 2);
+// Only the turn-tail slot is registered: it exists purely as a guaranteed mount
+// point for the per-message bridge, and its own button is hidden. The header
+// entry was retired so the rewind control has exactly one place — the user's row.
+assert.equal(registrations.length, 1);
 const registration = registrations.find((entry) => entry.options.name === 'conversation.chat.turnTail');
-const headerRegistration = registrations.find((entry) => entry.options.name === 'conversation.session.header.actions');
 assert.ok(registration !== undefined, 'turn-tail registration');
-assert.ok(headerRegistration !== undefined, 'header registration');
-assert.equal(headerRegistration.options.id, 'session-rewind');
-assert.equal(headerRegistration.options.order, -1);
+assert.equal(registrations.some((entry) => entry.options.name === 'conversation.session.header.actions'), false);
 assert.equal(registration.options.name, 'conversation.chat.turnTail');
 assert.equal(registration.options.id, 'session-rewind');
 assert.equal(registration.options.order, -1);
@@ -342,100 +342,10 @@ const noBoundary = registration.component({ ...props, turn: { turn: 3 }, seq: un
 assert.deepEqual(findAll(noBoundary, (node) => node.type === 'button'), []);
 //#endregion
 
-//#region session-header entry: candidate list -> mode -> fork
-const headerChildId = 'session-child-header';
-fetchCalls.length = 0;
-forkCalls.length = 0;
-opened.length = 0;
-sessionsService.fork = async (request) => {
-  forkCalls.push(request);
-  return headerChildId;
-};
-
-const headerProps = {
-  sessionId: 'session-parent-1',
-  useAccess: () => true,
-  ctx: {
-    get: (name) => {
-      if (name === 'sessions') return sessionsService;
-      if (name === 'uiWorkspace') return workspaceService;
-      return undefined;
-    },
-  },
-};
-
-// The trigger renders even with nothing loaded yet.
-// `renderHeader()` forces one full render pass (the tree is built lazily).
-const renderHeader = () => {
-  const tree = headerRegistration.component(headerProps);
-  findAll(tree, () => false);
-  return tree;
-};
-let headerTree = renderHeader();
-let headerTrigger = findAll(headerTree, (node) => node.type === 'button'
-  && String(node.props.className ?? '').includes('dshSessionRewindHeaderBtn'));
-assert.equal(headerTrigger.length, 1);
-
-// Opening it asks the Host for the finished Turns.
-headerTrigger[0].props.onClick();
-await flush();
-assert.equal(fetchCalls.length, 1);
-assert.equal(fetchCalls[0].route, '/api/session-rewind.candidates');
-assert.deepEqual(fetchCalls[0].body, { sessionId: 'session-parent-1' });
-headerTree = renderHeader();
-
-let headerRounds = findAll(headerTree, (node) => node.type === 'button'
-  && String(node.props.className ?? '').includes('dshSessionRewindRound'));
-assert.equal(headerRounds.length, 2, 'two candidate rounds');
-assert.match(textOf(headerTree), /session-rewind\.list\.round/u);
-assert.match(textOf(headerTree), /第二条提问/u);
-assert.match(textOf(headerTree), /session-rewind\.list\.files/u);
-
-// Choosing a round switches to the mode step: in-place is the primary action
-// and branching is still offered.
-headerRounds[0].props.onClick();
-assert.match(textOf(headerTree), /session-rewind\.mode\.inplace/u);
-assert.match(textOf(headerTree), /session-rewind\.mode\.inplaceFiles/u);
-assert.match(textOf(headerTree), /session-rewind\.mode\.fork/u);
-assert.match(textOf(headerTree), /session-rewind\.mode\.back/u);
-
-// Branch mode forks at that round's committed turn end, with no file write.
-const headerFork = findAll(headerTree, (node) => node.type === 'button'
-  && String(node.props.children ?? '') === 'session-rewind.mode.fork');
-assert.equal(headerFork.length, 1);
-headerFork[0].props.onClick();
-await flush(12);
-assert.deepEqual(forkCalls, [{ sessionId: 'session-parent-1', atSeq: 28, increaseTitle: true }]);
-assert.deepEqual(opened, [headerChildId]);
-assert.deepEqual(
-  JSON.parse(store.get(`dsh.conversation.${headerChildId}`)).draft,
-  { text: '第二条提问：把登录页改成深色主题', references: [] },
-);
-assert.equal(fetchCalls.filter((call) => call.route === '/api/session-rewind.restore').length, 0);
-
-// "Rewind and restore" reaches the restore route first, then forks.
-fetchCalls.length = 0;
-forkCalls.length = 0;
-opened.length = 0;
-headerTrigger = findAll(renderHeader(), (node) => node.type === 'button'
-  && String(node.props.className ?? '').includes('dshSessionRewindHeaderBtn'));
-headerTrigger[0].props.onClick();
-await flush();
-headerTree = renderHeader();
-headerRounds = findAll(headerTree, (node) => node.type === 'button'
-  && String(node.props.className ?? '').includes('dshSessionRewindRound'));
-assert.equal(headerRounds.length, 2);
-headerRounds[0].props.onClick();
-headerTree = renderHeader();
-const restoreBoth = findAll(headerTree, (node) => node.type === 'button'
-  && String(node.props.children ?? '') === 'session-rewind.mode.inplaceFiles');
-assert.equal(restoreBoth.length, 1);
-// In-place mode without a mount-less bridge must degrade to a visible error
-// instead of throwing (the DOM bridge only exists in a real page).
-restoreBoth[0].props.onClick();
-await flush(12);
-assert.match(textOf(headerTree), /session-rewind\.notice\.unavailable/u);
-assert.equal(forkCalls.length, 0);
+//#region retired header entry
+// The session-header entry is no longer registered: the rewind control lives on
+// the user's own message row, so there must be exactly one place to click.
+assert.equal(registrations.some((entry) => entry.options.name === 'conversation.session.header.actions'), false);
 //#endregion
 
 // --- popover wiring --------------------------------------------------------
