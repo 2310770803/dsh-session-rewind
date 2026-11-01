@@ -52,12 +52,12 @@
       },
       "versions": [
         {
-          "version": "1.3.1",
-          "publishTimestamp": 1793513431,
+          "version": "1.3.2",
+          "publishTimestamp": 1793513449,
           "source": {
             "type": "git",
             "url": "https://github.com/2310770803/dsh-session-rewind",
-            "commit": "5747d9416c8358c3a14eec44c76cf8ec7bbec4a3"
+            "commit": "71992a34ebb0e92897667b5c8f08028d144a5a8c"
           }
         }
       ]

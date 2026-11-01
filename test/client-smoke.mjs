@@ -8,6 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 
 //#region stubs
 const listeners = new Map();
@@ -436,5 +437,16 @@ await flush(12);
 assert.match(textOf(headerTree), /session-rewind\.notice\.unavailable/u);
 assert.equal(forkCalls.length, 0);
 //#endregion
+
+// --- popover wiring --------------------------------------------------------
+// v1.3.1 shipped a popover whose option callbacks referenced a `turn` the
+// enclosing function never declared. That throws inside a DOM listener, which the
+// browser swallows: clicking a control did nothing at all. Pin the wiring.
+{
+  const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.match(source, /const openPopover = \(anchor, seq, notice, turn/u);
+  assert.match(source, /runRewind\(seq, false, notice, turn\)/u);
+  assert.match(source, /runRewind\(seq, true, notice, turn\)/u);
+}
 
 console.log('client smoke: all assertions passed');

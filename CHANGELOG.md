@@ -8,6 +8,22 @@
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-01
+
+**修复：点回退"完全没反应"（选项按钮抛 ReferenceError，被浏览器静默吞掉）。**
+
+### 修复
+
+- `openPopover` 的定义漏了 `turn` 参数，但两个选项回调引用了它；点击时抛
+  `ReferenceError: turn is not defined`，事件监听器里的异常不会冒泡，于是请求根本没发出去，
+  输入框自然也不会被回填。现在 `turn` 正确传入。
+- 选项按钮的回调加了 `try/catch`，同步异常会以 `option-failed` 回传，不再静默。
+- `notice()` 调用移进 `runRewind` 的 try 内，避免提示函数本身异常导致整段跳过。
+- 补回归测试：`client-smoke` 现在钉住 `openPopover` 的参数列表与两处
+  `runRewind(seq, …, notice, turn)` 的转发（把这处 bug 重新引入会立即失败）。
+- 移除 `state.cutTurn` 残留写入（1.3.0 起改用 `hiddenTurns`）。
+
+
 ## [1.3.1] - 2026-11-01
 
 **修复：同一个会话回退多次时，只有第一次的轮次被隐藏。**
