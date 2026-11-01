@@ -198,7 +198,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+
+      # Deliberately no `registry-url`: setup-node would write
+      # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into .npmrc, and with
+      # pure trusted publishing there is no token to substitute — npm must take
+      # the OIDC path instead. The default registry is already npmjs.org.
+      - name: Pin the public registry
+        run: npm config set registry https://registry.npmjs.org
 
       - name: Assert the npm CLI supports trusted publishing
         run: |
