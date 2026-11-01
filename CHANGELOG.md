@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-11-01
+
+**首个发布到 npm 的版本（Trusted Publishing / OIDC，无令牌）。**
+
+### 变更
+
+- 无功能改动；仅为走通 npm 发布链路而递增版本。`publish.yml` 的 `npm` 任务通过 OIDC
+  发布并附 provenance，仓库变量 `NPM_TRUSTED_PUBLISHING=true` 已启用，`--provenance`
+  证明可核对到本仓库的这一次 Actions 运行。
+
+
 ## [1.2.6] - 2026-11-01
 
 **发布链路：目录用的位图图标、两个自检脚本、npm Trusted Publishing 任务。**
