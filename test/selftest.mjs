@@ -12,6 +12,15 @@ import { join } from 'node:path';
 import { isInsideGitMetadata, createArchive } from '../src/lib/archive.js';
 import { restoreFile } from '../src/lib/restore.js';
 import { locateTurn, userPromptOf } from '../src/plugin.js';
+import {
+  MARKER_SOURCE_KIND,
+  MARKER_TEXT,
+  hiddenFromSeq,
+  hiddenFromTurn,
+  listCandidates,
+  markerPayload,
+  planInPlace,
+} from '../src/lib/surface.js';
 
 const events = [
   { seq: 0, type: 'session', data: {} },
@@ -38,6 +47,53 @@ assert.equal(locateTurn(events, {}), null);
 assert.equal(userPromptOf(events, 1), 'first prompt');
 assert.equal(userPromptOf(events, 2), 'second prompt\nwith two blocks');
 assert.equal(userPromptOf(events, 3), null);
+
+// --- in-place surface planning ------------------------------------------
+const surface = [0, 3, 4, 5, 7, 8, 9];
+assert.deepEqual(planInPlace(events, surface, 3), {
+  targetSeq: 3,
+  surfaceStart: 3,
+  surfaceEnd: 9,
+  shadowedSeqs: [3, 4, 5, 7, 8, 9],
+});
+assert.deepEqual(planInPlace(events, surface, 7).shadowedSeqs, [7, 8, 9]);
+assert.throws(() => planInPlace(events, surface, 2), (error) => error.code === 'not-a-user-message');
+assert.throws(() => planInPlace(events, surface, 999), (error) => error.code === 'not-a-user-message');
+assert.throws(() => planInPlace(events, surface, 0), (error) => error.code === 'not-a-user-message');
+// a user message removed from the surface by compaction is not rewritable
+assert.throws(() => planInPlace(events, [4, 5, 7, 8, 9], 3), (error) => error.code === 'not-on-surface');
+assert.throws(() => planInPlace(events, [], 3), (error) => error.code === 'no-user-messages');
+
+const listed = listCandidates(events, surface);
+assert.deepEqual(listed.map((item) => item.seq), [7, 3]);
+assert.deepEqual(listed.map((item) => item.index), [1, 2]);
+assert.equal(listed[0].preview, ['second prompt', 'with two blocks'].join(String.fromCharCode(10)));
+
+// no marker yet: nothing hidden
+assert.equal(hiddenFromSeq(events), null);
+assert.equal(hiddenFromTurn(events), null);
+
+const marker = (seq, startSeq) => ({
+  seq,
+  type: 'user/message',
+  data: { source: { kind: MARKER_SOURCE_KIND }, content: [{ type: 'text', text: MARKER_TEXT }] },
+  surfaceOp: { op: 'replace', startSeq, endSeq: 9 },
+});
+const afterRewind = [...events, marker(10, 7)];
+assert.equal(hiddenFromSeq(afterRewind), 7);
+assert.equal(hiddenFromTurn(afterRewind), 2);
+// an older cut wins over a newer one, and a non-plugin message never counts
+const olderCut = [...afterRewind, marker(11, 3)];
+assert.equal(hiddenFromSeq(olderCut), 3);
+assert.equal(hiddenFromTurn(olderCut), 1);
+assert.equal(hiddenFromSeq([...events, { seq: 10, type: 'user/message', data: { source: { kind: 'user' }, content: [] } }]), null);
+
+const payload = markerPayload((seed) => `id:${seed}`);
+assert.equal(payload.role, 'user');
+assert.match(payload.id, /^id:session-rewind-\d+$/u);
+assert.equal(payload.content[0].text, MARKER_TEXT);
+assert.notEqual(payload.content[0].text, '');
+assert.deepEqual(payload.source, { kind: MARKER_SOURCE_KIND });
 
 // --- archive -------------------------------------------------------------
 const root = await mkdtemp(join(tmpdir(), 'rewind-test-'));

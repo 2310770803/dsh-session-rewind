@@ -238,8 +238,8 @@ globalThis.fetch = async (route, init) => {
       json: async () => ({
         ok: true,
         turns: [
-          { turn: 2, seq: 28, prompt: '第二条提问：把登录页改成深色主题', files: { count: 2, restorable: 2 } },
-          { turn: 1, seq: 12, prompt: '第一条提问：初始化项目', files: { count: 0, restorable: 0 } },
+          { turn: 2, seq: 28, userSeq: 21, prompt: '第二条提问：把登录页改成深色主题', files: { count: 2, restorable: 2 } },
+          { turn: 1, seq: 12, userSeq: 5, prompt: '第一条提问：初始化项目', files: { count: 0, restorable: 0 } },
         ],
       }),
     };
@@ -390,17 +390,19 @@ assert.match(textOf(headerTree), /session-rewind\.list\.round/u);
 assert.match(textOf(headerTree), /第二条提问/u);
 assert.match(textOf(headerTree), /session-rewind\.list\.files/u);
 
-// Choosing a round switches to the mode step.
+// Choosing a round switches to the mode step: in-place is the primary action
+// and branching is still offered.
 headerRounds[0].props.onClick();
-assert.match(textOf(headerTree), /session-rewind\.mode\.chatOnly/u);
-assert.match(textOf(headerTree), /session-rewind\.mode\.both/u);
+assert.match(textOf(headerTree), /session-rewind\.mode\.inplace/u);
+assert.match(textOf(headerTree), /session-rewind\.mode\.inplaceFiles/u);
+assert.match(textOf(headerTree), /session-rewind\.mode\.fork/u);
 assert.match(textOf(headerTree), /session-rewind\.mode\.back/u);
 
-// Chat-only mode forks at that round's committed turn end, with no file write.
-const headerPrimary = findAll(headerTree, (node) => node.type === 'button'
-  && String(node.props.className ?? '').includes('dshSessionRewindPrimary'));
-assert.equal(headerPrimary.length, 1);
-headerPrimary[0].props.onClick();
+// Branch mode forks at that round's committed turn end, with no file write.
+const headerFork = findAll(headerTree, (node) => node.type === 'button'
+  && String(node.props.children ?? '') === 'session-rewind.mode.fork');
+assert.equal(headerFork.length, 1);
+headerFork[0].props.onClick();
 await flush(12);
 assert.deepEqual(forkCalls, [{ sessionId: 'session-parent-1', atSeq: 28, increaseTitle: true }]);
 assert.deepEqual(opened, [headerChildId]);
@@ -425,14 +427,14 @@ assert.equal(headerRounds.length, 2);
 headerRounds[0].props.onClick();
 headerTree = renderHeader();
 const restoreBoth = findAll(headerTree, (node) => node.type === 'button'
-  && String(node.props.children ?? '') === 'session-rewind.mode.both');
+  && String(node.props.children ?? '') === 'session-rewind.mode.inplaceFiles');
 assert.equal(restoreBoth.length, 1);
+// In-place mode without a mount-less bridge must degrade to a visible error
+// instead of throwing (the DOM bridge only exists in a real page).
 restoreBoth[0].props.onClick();
 await flush(12);
-const restoreCall = fetchCalls.find((call) => call.route === '/api/session-rewind.restore');
-assert.ok(restoreCall !== undefined, 'restore request');
-assert.deepEqual(restoreCall.body, { sessionId: 'session-parent-1', turn: 2 });
-assert.deepEqual(forkCalls, [{ sessionId: 'session-parent-1', atSeq: 28, increaseTitle: true }]);
+assert.match(textOf(headerTree), /session-rewind\.notice\.unavailable/u);
+assert.equal(forkCalls.length, 0);
 //#endregion
 
 console.log('client smoke: all assertions passed');

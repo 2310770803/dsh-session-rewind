@@ -14,6 +14,8 @@ import {
   PLAN_PATH,
   RESTORE_PATH,
   createCandidatesHandler,
+  createCutsHandler,
+  createInplaceHandler,
   createPlanHandler,
   createRestoreHandler,
 } from '../src/lib/route.js';
@@ -169,6 +171,69 @@ assert.equal(res.status, 400);
 res = response();
 await candidatesHandler(request({ sessionId }, { host: 'example.com', origin: 'http://example.com' }), res);
 assert.equal(res.status, 403);
+
+// --- in-place rewind ----------------------------------------------------
+const executed = [];
+const inplaceHandler = createInplaceHandler({
+  describe: async (id, seq) => {
+    if (id !== sessionId) throw Object.assign(new Error('not live'), { status: 409 });
+    if (seq !== 11) throw Object.assign(new Error('only your own messages'), { code: 'not-a-user-message' });
+    return { targetSeq: 11, surfaceStart: 11, surfaceEnd: 41, prompt: 'make it dark', turn: 2 };
+  },
+  execute: async (id, seq, restoreFiles) => {
+    if (seq !== 11) throw Object.assign(new Error('only your own messages'), { code: 'not-a-user-message' });
+    executed.push({ id, seq, restoreFiles });
+    return { markerSeq: 50, targetSeq: seq, prompt: 'make it dark', turn: 2, hiddenFromSeq: 11, hiddenFromTurn: 2 };
+  },
+  trustedHosts: () => [],
+});
+
+// dryRun plans without executing
+res = response();
+await inplaceHandler(request({ sessionId, seq: 11, dryRun: true }), res);
+assert.equal(res.status, 200);
+assert.equal(JSON.parse(res.body).dryRun, true);
+assert.deepEqual(executed, []);
+
+// execute appends + reports the cut
+res = response();
+await inplaceHandler(request({ sessionId, seq: 11 }), res);
+assert.equal(res.status, 200);
+assert.deepEqual(JSON.parse(res.body), {
+  ok: true, markerSeq: 50, targetSeq: 11, prompt: 'make it dark', turn: 2, hiddenFromSeq: 11, hiddenFromTurn: 2,
+});
+assert.deepEqual(executed, [{ id: sessionId, seq: 11, restoreFiles: true }]);
+
+// a planning refusal is a 409 with a code, not a 500
+executed.length = 0;
+res = response();
+await inplaceHandler(request({ sessionId, seq: 12 }), res);
+assert.equal(res.status, 409);
+assert.equal(JSON.parse(res.body).code, 'not-a-user-message');
+
+// gates
+res = response();
+await inplaceHandler(request({ sessionId }, {}), res);
+assert.equal(res.status, 400);
+res = response();
+await inplaceHandler(request({ sessionId, seq: -1 }), res);
+assert.equal(res.status, 400);
+res = response();
+await inplaceHandler(request({ sessionId, seq: 11 }, { host: 'evil.example', origin: 'http://evil.example' }), res);
+assert.equal(res.status, 403);
+
+// --- cuts ----------------------------------------------------------------
+const cutsHandler = createCutsHandler({
+  cutsOf: async (id) => (id === sessionId ? { hiddenFromSeq: 11, hiddenFromTurn: 2 } : { hiddenFromSeq: null, hiddenFromTurn: null }),
+  trustedHosts: () => [],
+});
+res = response();
+await cutsHandler(request({ sessionId }), res);
+assert.equal(res.status, 200);
+assert.deepEqual(JSON.parse(res.body), { ok: true, hiddenFromSeq: 11, hiddenFromTurn: 2 });
+res = response();
+await cutsHandler(request({}), res);
+assert.equal(res.status, 400);
 
 // --- restore -------------------------------------------------------------
 res = response();

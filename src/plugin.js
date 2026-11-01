@@ -26,14 +26,20 @@ import { archiveDirectory, createArchive } from './lib/archive.js';
 import { restoreFile as restoreOne } from './lib/restore.js';
 import {
   CANDIDATES_PATH,
+  CUTS_PATH,
+  INPLACE_PATH,
   PLAN_PATH,
   RESTORE_PATH,
   SELFCHECK_PATH,
   createCandidatesHandler,
+  createCutsHandler,
+  createInplaceHandler,
   createPlanHandler,
   createRestoreHandler,
   createSelfcheckHandler,
 } from './lib/route.js';
+import { describeInPlace, executeInPlace, liveAgentOf } from './lib/inplace.js';
+import { hiddenFromSeq, hiddenFromTurn } from './lib/surface.js';
 
 export const name = 'session-rewind';
 
@@ -375,6 +381,105 @@ export function apply(ctx) {
       };
 
       /**
+       * The user-authored message that opened one Turn, if the Turn has one.
+       * This is the in-place rewind target: the marker replaces it and every
+       * surface node after it.
+       */
+      const userMessageOf = (events, turn) => {
+        let inside = false;
+        for (const event of events) {
+          if (!isRecord(event)) continue;
+          if (event.type === 'turn/start' && event.data?.turn === turn) {
+            inside = true;
+            continue;
+          }
+          if (event.type === 'turn/end' && event.data?.turn === turn) return null;
+          if (!inside || event.type !== 'user/message') continue;
+          if (event.data?.source?.kind !== 'user') continue;
+          if (typeof event.seq !== 'number') continue;
+          return event;
+        }
+        return null;
+      };
+
+      const liveSession = (sessionId) => {
+        const agent = liveAgentOf(ctx, sessionId);
+        const session = agent?.session;
+        if (session === undefined || session === null) {
+          const error = new Error('this session is not live, so it cannot be rewound in place');
+          error.status = 409;
+          throw error;
+        }
+        return session;
+      };
+
+      /** Restore every archived Turn at or after `fromTurn` (newest first). */
+      const restoreTurns = async (sessionId, fromTurn) => {
+        const fsService = serviceOf(scope, ctx, 'fs');
+        if (fsService === undefined) return undefined;
+        const syncObservation = async (absolute, observation) => {
+          try {
+            const target = await fsService.resolve(absolute);
+            const emit = typeof scope.emit === 'function' ? scope.emit.bind(scope) : undefined;
+            if (emit !== undefined) emit('fs/observed', target, observation, undefined);
+          } catch {
+            /* best-effort */
+          }
+        };
+        const summary = { restored: 0, deleted: 0, failed: 0, skipped: 0, turns: [] };
+        let turn = Number.isInteger(fromTurn) ? fromTurn : undefined;
+        if (turn === undefined) return summary;
+        // The archive is keyed by turn; scan forward until a turn has no record.
+        for (let current = turn; current < turn + 400; current += 1) {
+          let entry = null;
+          try {
+            entry = await archive.get(sessionId, current);
+          } catch {
+            entry = null;
+          }
+          if (entry === null) continue;
+          const context = {
+            workspaceRoot: typeof entry.cwd === 'string' && entry.cwd !== '' ? entry.cwd : undefined,
+            sessionId,
+          };
+          for (const file of Array.isArray(entry.files) ? entry.files : []) {
+            if (file.existed === true && typeof file.blob !== 'string') {
+              summary.skipped += 1;
+              continue;
+            }
+            try {
+              const outcome = await restoreOne({ fsService, archive, file, ...context, syncObservation });
+              if (outcome.status === 'restored') summary.restored += 1;
+              else if (outcome.status === 'deleted') summary.deleted += 1;
+              else if (outcome.status === 'skipped') summary.skipped += 1;
+              else summary.failed += 1;
+            } catch {
+              summary.failed += 1;
+            }
+          }
+          summary.turns.push(current);
+        }
+        return summary;
+      };
+
+      const describeInPlaceFor = (sessionId, seq) => describeInPlace(liveSession(sessionId), seq);
+
+      const executeInPlaceFor = (sessionId, seq, restoreFiles) => executeInPlace({
+        ctx,
+        sessionId,
+        seq,
+        restoreTurns: restoreFiles === true
+          ? async (fromTurn) => restoreTurns(sessionId, fromTurn)
+          : undefined,
+      });
+
+      const cutsOf = async (sessionId) => {
+        // Read the durable log: the client needs the cut after a page reload too.
+        const events = await readEvents(ctx, sessionId);
+        return { hiddenFromSeq: hiddenFromSeq(events), hiddenFromTurn: hiddenFromTurn(events) };
+      };
+
+      /**
        * Every finished Turn of one Session, newest first, as a rewind target.
        * A candidate needs a committed `turn/end` seq because that is the boundary
        * `sessions.fork` accepts.
@@ -399,9 +504,11 @@ export function apply(ctx) {
             /* the archive is optional here */
           }
           const files = Array.isArray(entry?.files) ? entry.files : [];
+          const userMessage = userMessageOf(events, end.turn);
           candidates.push({
             turn: end.turn,
             seq: end.seq,
+            userSeq: userMessage === null ? null : userMessage.seq,
             prompt: userPromptOf(events, end.turn),
             files: {
               count: files.length,
@@ -479,7 +586,7 @@ export function apply(ctx) {
             plugin: 'dsh-session-rewind',
             archive: { directory: archive.directory, ...archiveStats },
             client: { discovered: clientPath !== null, path: clientPath },
-            routes: [SELFCHECK_PATH, CANDIDATES_PATH, PLAN_PATH, RESTORE_PATH],
+            routes: [SELFCHECK_PATH, CANDIDATES_PATH, INPLACE_PATH, CUTS_PATH, PLAN_PATH, RESTORE_PATH],
           };
         },
         trustedHosts,
@@ -492,6 +599,19 @@ export function apply(ctx) {
         onError,
       });
 
+      const inplaceHandler = createInplaceHandler({
+        describe: describeInPlaceFor,
+        execute: executeInPlaceFor,
+        trustedHosts,
+        onError,
+      });
+
+      const cutsHandler = createCutsHandler({
+        cutsOf,
+        trustedHosts,
+        onError,
+      });
+
       try {
         scope.effect(
           () => scope.webServer.register({ kind: 'exact', path: SELFCHECK_PATH, handler: statusHandler }),
@@ -500,6 +620,14 @@ export function apply(ctx) {
         scope.effect(
           () => scope.webServer.register({ kind: 'exact', path: CANDIDATES_PATH, handler: candidatesHandler }),
           'session-rewind: candidates route',
+        );
+        scope.effect(
+          () => scope.webServer.register({ kind: 'exact', path: INPLACE_PATH, handler: inplaceHandler }),
+          'session-rewind: in-place route',
+        );
+        scope.effect(
+          () => scope.webServer.register({ kind: 'exact', path: CUTS_PATH, handler: cutsHandler }),
+          'session-rewind: cuts route',
         );
         scope.effect(
           () => scope.webServer.register({ kind: 'exact', path: PLAN_PATH, handler: planHandler }),

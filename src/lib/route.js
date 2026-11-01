@@ -18,6 +18,8 @@
 export const PLAN_PATH = '/api/session-rewind.plan';
 export const RESTORE_PATH = '/api/session-rewind.restore';
 export const CANDIDATES_PATH = '/api/session-rewind.candidates';
+export const INPLACE_PATH = '/api/session-rewind.inplace';
+export const CUTS_PATH = '/api/session-rewind.cuts';
 export const SELFCHECK_PATH = '/api/session-rewind.selfcheck';
 
 /** A rewind request is a session id plus a Turn number or a seq. */
@@ -193,6 +195,113 @@ function targetOf(value) {
     throw new RequestBoundaryError(400, 'turn or seq is required');
   }
   return { sessionId, turn, seq };
+}
+
+/**
+ * Build the in-place rewind route.
+ *
+ * `dryRun` returns the plan (what would be cut, and the prompt that would come
+ * back) without touching the log, which is what lets the browser preview the
+ * action and what makes the whole path testable against a live session.
+ *
+ * @param {{
+ *   describe: (sessionId: string, seq: number) => object,
+ *   execute: (sessionId: string, seq: number, restoreFiles: boolean) => Promise<object>,
+ *   trustedHosts?: () => readonly string[],
+ *   onError?: (error: unknown) => void,
+ * }} options
+ * @returns {(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => Promise<void>}
+ */
+export function createInplaceHandler({
+  describe,
+  execute,
+  trustedHosts = () => [],
+  onError = () => {},
+}) {
+  return async (request, response) => {
+    try {
+      if (request.method !== 'POST') {
+        writeText(response, 405, 'method not allowed');
+        return;
+      }
+      if (!isTrustedRequest(request, hostsOf(trustedHosts))) {
+        writeText(response, 403, 'forbidden');
+        return;
+      }
+      const mediaType = header(request.headers, 'content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+      if (mediaType !== 'application/json') {
+        writeText(response, 415, 'content type must be application/json');
+        return;
+      }
+      const body = await readJsonBody(request);
+      if (!isRecord(body)) throw new RequestBoundaryError(400, 'request body must be a JSON object');
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      if (sessionId === '') throw new RequestBoundaryError(400, 'sessionId is required');
+      if (!Number.isInteger(body.seq) || body.seq < 0) {
+        throw new RequestBoundaryError(400, 'seq must be a non-negative integer');
+      }
+      if (body.dryRun === true) {
+        const plan = await describe(sessionId, body.seq);
+        writeJson(response, 200, { ok: true, dryRun: true, plan });
+        return;
+      }
+      const result = await execute(sessionId, body.seq, body.restoreFiles !== false);
+      writeJson(response, 200, { ok: true, ...result });
+    } catch (error) {
+      if (typeof error?.code === 'string' && error?.status === undefined) {
+        try {
+          // A planning refusal is the caller's problem, not a server fault.
+          writeJson(response, 409, { ok: false, code: error.code, message: messageOf(error) });
+          return;
+        } catch {
+          /* fall through to the generic failure path */
+        }
+      }
+      fail(response, error, onError);
+    }
+  };
+}
+
+/**
+ * Build the cuts route: the earliest surface cut already executed in a Session,
+ * which the Chat view uses to hide the withdrawn rows.
+ *
+ * @param {{
+ *   cutsOf: (sessionId: string) => Promise<number | null>,
+ *   trustedHosts?: () => readonly string[],
+ *   onError?: (error: unknown) => void,
+ * }} options
+ * @returns {(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => Promise<void>}
+ */
+export function createCutsHandler({ cutsOf, trustedHosts = () => [], onError = () => {} }) {
+  return async (request, response) => {
+    try {
+      if (request.method !== 'POST') {
+        writeText(response, 405, 'method not allowed');
+        return;
+      }
+      if (!isTrustedRequest(request, hostsOf(trustedHosts))) {
+        writeText(response, 403, 'forbidden');
+        return;
+      }
+      const mediaType = header(request.headers, 'content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+      if (mediaType !== 'application/json') {
+        writeText(response, 415, 'content type must be application/json');
+        return;
+      }
+      const value = await readJsonBody(request);
+      if (!isRecord(value)) throw new RequestBoundaryError(400, 'request body must be a JSON object');
+      const sessionId = typeof value.sessionId === 'string' ? value.sessionId : '';
+      if (sessionId === '') throw new RequestBoundaryError(400, 'sessionId is required');
+      const cuts = await cutsOf(sessionId);
+      writeJson(response, 200, {
+        ok: true,
+        ...(isRecord(cuts) ? cuts : { hiddenFromSeq: null, hiddenFromTurn: null }),
+      });
+    } catch (error) {
+      fail(response, error, onError);
+    }
+  };
 }
 
 /**
