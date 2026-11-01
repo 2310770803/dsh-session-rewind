@@ -26,7 +26,18 @@ https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json
 > `awesome-dsh-plugin.com` 这类 Pages 站点在部分网络下更稳。
 > `raw.githubusercontent.com/.../main/index.json` 也能用，但没有 CDN 加速。
 
-## 2. 用户怎么加索引源
+## 2. 怎么加索引源
+
+### 本机已经加好了
+
+这台机器（profile `desktop`）的 `cordis.patch.yml` 末尾已经写入下面的条目，并且已经通过
+一次 profile 重组生效（写入前备份在 `cordis.patch.yml.rewind-backup`）。所以只需要打开
+**插件 → 发现**，在搜索框里搜 `rewind` 或 `会话回退`，条目里点安装即可。
+
+> 「发现」标签页是按需抓取的：只有在它被打开时才会去拉索引源，因此加完索引源后**要打开
+> 一次「发现」页**才会看到条目；不需要重启 DSH。
+
+### 换一台机器时手动加
 
 1. 打开左侧 **插件 → 发现（Discover）**。
 2. 点 **索引源（Index sources）** → **添加索引源**，粘贴上面的 jsDelivr URL。
