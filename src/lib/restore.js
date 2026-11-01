@@ -59,17 +59,33 @@ async function sandboxPolicyFor({ fsService, target, workspaceRoot }) {
  *     blob: string | null, size: number, reason?: string,
  *   },
  *   workspaceRoot?: string,
+ *   syncObservation?: (absolute: string, observation: { kind: string, version?: string }) => Promise<void>,
  * }} input
  * @returns {Promise<{ path: string, status: 'restored' | 'deleted' | 'skipped' | 'failed', message?: string }>}
  */
-export async function restoreFile({ fsService, archive, file, workspaceRoot }) {
+export async function restoreFile({ fsService, archive, file, workspaceRoot, syncObservation }) {
   const displayPath = typeof file.displayPath === 'string' && file.displayPath !== ''
     ? file.displayPath
     : file.path;
 
+  /**
+   * A raw-Node mutation is invisible to DSH's fs observation policy, so the
+   * policy would keep judging the next write against the pre-restore state and
+   * reject it as a stale version. Publishing the true observation re-syncs it.
+   */
+  const sync = async (observation) => {
+    if (typeof syncObservation !== 'function') return;
+    try {
+      await syncObservation(file.path, observation);
+    } catch {
+      /* an unsynced observation only costs a spurious stale-version retry */
+    }
+  };
+
   if (file.existed !== true) {
     // The Turn created this file, so the pre-Turn state is "absent".
     await rm(file.path, { force: true });
+    await sync({ kind: 'absent' });
     return { path: displayPath, status: 'deleted' };
   }
 
@@ -95,5 +111,7 @@ export async function restoreFile({ fsService, archive, file, workspaceRoot }) {
   }
 
   await writeFile(file.path, bytes);
+  const after = await fsService.stat(target);
+  if (after !== undefined && after !== null) await sync({ kind: 'present', version: after.version });
   return { path: displayPath, status: 'restored' };
 }

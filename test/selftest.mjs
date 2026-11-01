@@ -161,9 +161,36 @@ const createdFile = join(workDir, 'made.txt');
 const madeRecord = await archive2.record({ sessionId: 's2', turn: 4, absolute: createdFile, displayPath: 'made.txt' });
 assert.equal(madeRecord.existed, false);
 await writeFile(createdFile, 'made\n', 'utf8');
-const removed = await restoreFile({ fsService, archive: archive2, file: madeRecord });
+const observations = [];
+const removed = await restoreFile({
+  fsService,
+  archive: archive2,
+  file: madeRecord,
+  workspaceRoot: workDir,
+  syncObservation: async (absolute, observation) => observations.push({ absolute, observation }),
+});
 assert.deepEqual(removed, { path: 'made.txt', status: 'deleted' });
 await assert.rejects(readFile(createdFile, 'utf8'), (error) => error.code === 'ENOENT');
+// The removal is published as an observation so DSH's fs policy does not keep
+// believing the file still exists.
+assert.deepEqual(observations, [{ absolute: createdFile, observation: { kind: 'absent' } }]);
+
+// A binary restore publishes the re-read version as a present observation.
+// (NUL/0xFF bytes so the pre-image is genuinely not UTF-8.)
+await writeFile(binary, Buffer.from([0, 255, 1]), 'binary');
+const binBefore2 = await archive2.record({ sessionId: 's2', turn: 5, absolute: binary, displayPath: 'logo.bin' });
+assert.equal(binBefore2.text, false);
+await writeFile(binary, Buffer.from([6, 6]), 'binary');
+const binaryObservations = [];
+await restoreFile({
+  fsService,
+  archive: archive2,
+  file: binBefore2,
+  workspaceRoot: workDir,
+  syncObservation: async (absolute, observation) => binaryObservations.push({ absolute, observation }),
+});
+assert.deepEqual([...await readFile(binary)], [0, 255, 1]);
+assert.deepEqual(binaryObservations, [{ absolute: binary, observation: { kind: 'present', version: 'v-current' } }]);
 
 // a pruned/absent blob is reported, never guessed
 const goneBlob = await restoreFile({

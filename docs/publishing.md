@@ -192,6 +192,22 @@ node scripts/build-index.mjs --dry-run          # 只把文档打到 stdout，�
 
 `workflow_dispatch` 是不发版的干跑：同样的检查与索引重建，但不提交、不建 Release。
 
+> 由 `GITHUB_TOKEN` 推送的提交**不会**再触发一轮 CI（GitHub 防递归的规则），所以
+> 发布工作流推回 `main` 的那个 index 提交不会跑 `ci.yml`。这不是漏洞：工作流在推送**之前**
+> 已经跑过 `--check`，推上去的文件就是被证明过的那个。
+
+### 本仓库的现状（2026-11-01 实测）
+
+- `v1.1.0` 已发布：<https://github.com/2310770803/dsh-session-rewind/releases/tag/v1.1.0>，
+  资产有 `index.json`（sha256 `8bc2cfc7…b5bd`）与 `dsh-session-rewind.tgz`；
+- `main` 的索引提交由发布工作流推回（提交信息 `chore(index): regenerate for v1.1.0`），
+  索引固定到 `dd76efc22ed01b0b64d71b02cc92a08f5cdafba9`；
+- Release 工作流全绿（run `41265021487`，含测试、重新生成、`--check`、建 Release、上传资产）；
+- 索引源 URL 现在返回 `200`，并用宿主校验器 `parseMarketIndex` 解析通过，安装参数为
+  `git+https://github.com/2310770803/dsh-session-rewind.git#dd76efc…`；
+- jsDelivr 第一次读到的仍是旧缓存（固定 `bd98ec9`），执行一次 purge 之后就与
+  Release 资产逐字节一致了——这就是下面第 1 步存在的原因。
+
 ### 发布之后要确认的事
 
 1. jsDelivr 是否已经返回新内容：

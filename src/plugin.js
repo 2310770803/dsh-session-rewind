@@ -438,7 +438,20 @@ export function apply(ctx) {
             error.status = 503;
             throw error;
           }
-          return restoreOne({ fsService, archive, file, ...context });
+          // A raw-Node restore is invisible to the fs observation policy; publish
+          // the true state so the Session's next write of the same path is not
+          // judged against the stale pre-restore observation.
+          const syncObservation = async (absolute, observation) => {
+            try {
+              const target = await fsService.resolve(absolute);
+              const emit = typeof scope.emit === 'function' ? scope.emit.bind(scope) : undefined;
+              if (emit === undefined) return;
+              emit('fs/observed', target, observation, undefined);
+            } catch {
+              /* best-effort */
+            }
+          };
+          return restoreOne({ fsService, archive, file, ...context, syncObservation });
         },
         trustedHosts,
         onError,

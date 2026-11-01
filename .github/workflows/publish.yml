@@ -119,6 +119,11 @@ jobs:
       # This is what actually updates the index source users configured: the
       # pinned commit stays the release commit, and jsDelivr re-reads `main`.
       # The push is a fast-forward because the tag was verified against main.
+      #
+      # GitHub does not start a new workflow run for a push made with the default
+      # GITHUB_TOKEN, so this commit will not re-trigger ci.yml. That is why
+      # `--check` ran above: the pushed file is already proven to match
+      # package.json at the pinned commit.
       - name: Commit the refreshed index back to main
         if: github.ref_type == 'tag'
         run: |

@@ -4,7 +4,6 @@
 - **本机 DSH `0.2.1-rc.5`**。`app.asar:<n>` 是写作时该 archive 的 `grep -a -n` 行号，会随版本失效；**以引号里的声明原文为准**。两处冲突时以本机为准，全部冲突见 §6。
 
 ## 0. 五条结论
-
 1. 按钮 = **两个入口**：`conversation.session.header.actions`（会话级 list slot，只挂一个"门户桥"）＋ 每条用户消息行的 React `createPortal` ↶。后者是必需的：DSH **没有** per-user-message 动作槽。
 2. 就地回退 = **一次 append**：`session.append('user/message', marker, { surfaceOp: {op:'replace',startSeq,endSeq}, sourceEventSeqs })`。只剪模型可见面，日志一条不删（`src/index.ts:786-789`）。
 3. **Host append 不会让 Chat 隐藏旧行**（Chat 只按 append-origin 事件建行，`app.asar:454564`）→ 必须在客户端 wrap `chat` view builder 把区间节点标 `visibility:'hidden'`。**Lead 必须动 client 半边。**
@@ -35,12 +34,10 @@ yield slots.inject(HEADER_ACTIONS_SLOT, () => slots.register(
 ### 1.3 锚点定位
 
 ```ts
-// src/client/portals.tsx:393
+// src/client/portals.tsx:393,432-447
 const USER_SEAT_SELECTOR = '[data-chat-flow-kind="user"][data-chat-anchor-key], [data-chat-flow-kind="steering"][data-chat-anchor-key]'
-// src/client/portals.tsx:432-447（摘）
-const buttons = Array.from(row?.querySelectorAll('button') ?? [])
-const lastButton = buttons.filter(b => !b.classList.contains(CLASS.button)).at(-1)   // 跳过自己
-const structural = lastButton?.parentElement                                        // 复制/分支按钮的容器
+const buttons = Array.from(row?.querySelectorAll('button') ?? []).filter(b => !b.classList.contains(CLASS.button))
+const structural = buttons.at(-1)?.parentElement        // 最后一个 button（复制/分支）的容器
 if (structural instanceof HTMLElement && structural.querySelector('button') !== null) return structural
 ```
 
@@ -94,7 +91,6 @@ yield ctx.commands.register({ name: ENGINE_COMMAND /* 'rewind-plugin' */, descri
 本机 `decorate` 与官方用例同形（`app.asar:459984`；用例 `500364-500382`）。候选表**必须**由 Host 从 `session.snapshotEvents()` 全量 log 算，不能用已加载的历史窗口。参考走 Connection RPC；**我们更省事**：现有插件的 `/api/session-rewind.candidates` 路由已在用（`lib/client.js:64,765`）。
 
 ## 2. 就地回退契约
-
 ### 2.1 那次 append
 
 ```ts
@@ -124,9 +120,7 @@ type SurfaceOp = 'append' | { op: 'replace'; startSeq: SessionSeq; endSeq: Sessi
 ```ts
 // src/index.ts:469,479-484
 const REWIND_MARKER_CONTENT: ContentBlock[] = [{ type: 'text', text: '(empty message)' }]
-function buildMarker(): UserMessage {
-  return createUserMessage({ content: REWIND_MARKER_CONTENT, source: REWIND_MARKER_SOURCE })
-}
+const buildMarker = () => createUserMessage({ content: REWIND_MARKER_CONTENT, source: REWIND_MARKER_SOURCE })
 // src/marker.ts:12-22
 declare module '@deepseek-ai/dsh-llm' { interface MessageSourceMap { 'dsh-rewind': { kind: 'dsh-rewind' } } }
 export const REWIND_MARKER_SOURCE = Object.freeze({ kind: 'dsh-rewind' } as const)
@@ -134,8 +128,7 @@ export const REWIND_MARKER_SOURCE = Object.freeze({ kind: 'dsh-rewind' } as cons
 
 - `UserMessage = MessageBase & {role:'user'}`，`MessageBase = {id: MessageId; content: readonly ContentBlock[]; source: MessageSource}`；`createUserMessage({content,source})` 自补 `role` 与 `id`（`app.asar:1659040-1659068`）。**不要手写 `id`。**
 - 内容必须**常量非空**：真空调用户在严格 OpenAI 兼容网关 400（`src/index.ts:459-468`，issue #21）。
-- 本机 `MessageSourceMap` **无 `plugin` 兜底 kind**（键集止于 `webhook`），所以 TS 必须模块增强；运行时宽容——未知 kind 走 `{role:'inject', label: kind}`、`contextForm` 返回 `null`，不抛（`app.asar:452462-452480`）。
-- 我们自己的 kind 建议用 **`session-rewind`**（与包名一致），改名不影响任何宿主逻辑。
+- 本机 `MessageSourceMap` **无 `plugin` 兜底 kind**（键集止于 `webhook`），所以 TS 必须模块增强；运行时宽容——未知 kind 走 `{role:'inject', label: kind}`、`contextForm` 返回 `null`，不抛（`app.asar:452462-452480`）。我们自己的 kind 建议用 **`session-rewind`**（与包名一致），改名不影响任何宿主逻辑。
 
 ### 2.3 目标与区间（纯函数，可直接翻 JS）
 
@@ -145,12 +138,10 @@ export const REWIND_MARKER_SOURCE = Object.freeze({ kind: 'dsh-rewind' } as cons
 // src/rewind.ts
 108-112  isHumanUserMessageEvent = e => e.type === 'user/message' && e.data.source.kind === 'user'
 164-187  listRewindCandidates(events, surface, limit=100)   // 倒序扫 events，仅 surface 内，index 从 1 起
-197-246  planRewind(events, surface, target):
-           targetEvent = events.find(e => e.seq === seq)
-           assert isHumanUserMessageEvent(targetEvent)     // 否则 not-a-user-message
-           targetIndex = surface.indexOf(seq)
-           if (targetIndex === -1) throw not-on-surface     // 被 compaction 遮蔽
-           shadowedSeqs = surface.slice(targetIndex)        // 含目标本身
+197-246  planRewind(events, surface, {kind:'seq',seq}):
+           targetEvent = events.find(e => e.seq === seq);  assert isHumanUserMessageEvent(targetEvent)   // 否则 not-a-user-message
+           targetIndex = surface.indexOf(seq);  if (targetIndex === -1) throw not-on-surface              // 被 compaction 遮蔽
+           shadowedSeqs = surface.slice(targetIndex)                                                      // 含目标本身
            surfaceStart = shadowedSeqs[0]; surfaceEnd = shadowedSeqs.at(-1)
 ```
 
@@ -161,19 +152,19 @@ export const REWIND_MARKER_SOURCE = Object.freeze({ kind: 'dsh-rewind' } as cons
 ```js
 // app.asar:1859506-1859521 applySurface —— 裁剪语义
 const start = surface.indexOf(replace.start), end = surface.indexOf(replace.end)
-if (start < 0 || end < start) throw SessionFormatError(`... replacement range is not on the current surface`)
+if (start < 0 || end < start) throw SessionFormatError('... replacement range is not on the current surface')
 const shadowed = surface.slice(start, end + 1)
-if (shadowed.some(seq => !sources.has(seq))) throw SessionFormatError(`... sourceEventSeqs omit a shadowed surface node`)
+if (shadowed.some(seq => !sources.has(seq))) throw SessionFormatError('... sourceEventSeqs omit a shadowed surface node')
 return [...surface.slice(0, start), event.seq, ...surface.slice(end + 1)]
 ```
 
 | 规则 | 本机失败文案 |
 | --- | --- |
-| start/end 在当前 surface 上且 start 在前、且都 < 自身 seq | `start seq N not found in surface` / `is after end seq` / `must reference earlier events` |
-| `sourceEventSeqs` 全覆盖被遮蔽节点，且非空/不重复/不引用 ≥ 自身 | `must include every shadowed surface node; missing …` / `must not be empty` / `must not contain duplicates` |
+| start/end 在当前 surface 上、start 在前、且都 < 自身 seq | `start seq N not found in surface` / `is after end seq` / `must reference earlier events` |
+| `sourceEventSeqs` 全覆盖被遮蔽节点，非空/不重复/不引用 ≥ 自身 | `must include every shadowed surface node; missing …` / `must not be empty` / `must not contain duplicates` |
 | `assistant/message` 不得带 `sourceEventSeqs`；surface 事件缺 `surfaceOp` | `… cannot carry sourceEventSeqs` / `… requires a surfaceOp marker` |
 
-落地是 `splice(startIdx, endIdx-startIdx+1, event.seq)` 且 `replaceGeneration`/`contentGeneration` 各 +1（`app.asar:1875130-1875135`）——这两个计数器是宿主自己 prompt 重建/UI 刷新的信号，插件不要手动维护。
+落地是 `splice(startIdx, endIdx-startIdx+1, event.seq)` 且 `replaceGeneration`/`contentGeneration` 各 +1（`app.asar:1875130-1875135`）——这两个计数器是宿主 prompt 重建/UI 刷新的信号，插件不要手动维护。
 
 ### 2.5 前置条件与失败模式（顺序照抄）
 
@@ -181,11 +172,8 @@ return [...surface.slice(0, start), event.seq, ...surface.slice(end + 1)]
 // src/index.ts:749-781（摘）
 if (inflight.has(sessionId)) return { kind:'error', text: t('inflight') }     // 双击/双标签：第二次会打在被第一次遮蔽的节点上
 inflight.add(sessionId)
-if (agent.status !== 'idle') {
-  agent.cancel({ kind: 'user' }, { keepInbox: true })                       // 保留 inbox，只砍未来
-  if (!await waitForAgentIdle(agent, invocation.signal)) return { kind:'error', text: t('stopFailed') }
-}
-dropPendingSteering(agent)                                                  // 只清 inbox.nextStep；nextTurn 不动
+if (agent.status !== 'idle') { agent.cancel({ kind:'user' }, { keepInbox:true }); if (!await waitForAgentIdle(agent, invocation.signal)) return { kind:'error', text: t('stopFailed') } }
+dropPendingSteering(agent)                                                    // 只清 inbox.nextStep；nextTurn 不动
 plan = resolveOrError(agent.session.snapshotEvents(), agent.session.surface.nodes, rawTarget)   // abort 则报 cancelled
 ```
 
@@ -200,7 +188,6 @@ plan = resolveOrError(agent.session.snapshotEvents(), agent.session.surface.node
 > 未确认（运行期）：本机 Chat 是否对 marker 生成任何边框行；按 `match` 判据不进 Chat，未在浏览器实测。
 
 ## 3. Composer 回填
-
 ```ts
 // src/client/index.ts:210-219
 const input = ctx.get('conversation')?.input
@@ -211,14 +198,11 @@ if (input === undefined || scope === undefined) return undefined
 
 本机语义（已确认）：`conversation.input.for(actx)` 需要**已保留的会话 scope**，否则抛 `"conversation.input.for requires a retained Session scope"`（`app.asar:476954-476960`）；`setDraft` = 整体替换草稿、换行切段、光标落尾、并入历史（`476198-476213`）；`focus()` 优先恢复 Lexical 选区（`476566-476572`）。
 
-图片（`src/client/index.ts:242-298`）：`session.readAttachment({attachmentId,mediaType,bytes,width,height,name})` → `new File([bytes], name, {type})` → `conversation.createDrafts(sessionId, files)` → `conversation.input.for(scope).addAttachments(draftIds)`；`admitted === false`（composer busy）时 `releaseDraftAttachments?.(drafts)`。**先图后文**：`addAttachments` 不覆盖正在编辑的草稿，所以图片不受"空 composer 守卫"限制。`file` 块不还原（客户端无文件字节读取通道）。
-
-**能否从任意 slot 组件调**：能，但必须自己拿 scope——`input.for()` 只认 `ctx.sessions.scope(sessionId)`，不认 id 字符串。参考仍把它包成 `setComposerText(sessionId,text)` 注入桥（`src/client/index.ts:306-313`），是为了共用"只填发生回退的那个主视图会话"的判断：`if (!isMainViewSession(session.sessionId)) return`（`src/client/portals.tsx:319-321`）——多窗口下必须有。
+图片（`src/client/index.ts:242-298`）：`session.readAttachment({attachmentId,mediaType,bytes,width,height,name})` → `new File([bytes], name, {type})` → `conversation.createDrafts(sessionId, files)` → `conversation.input.for(scope).addAttachments(draftIds)`；`admitted === false`（composer busy）时 `releaseDraftAttachments?.(drafts)`。**先图后文**：`addAttachments` 不覆盖正在编辑的草稿，所以图片不受"空 composer 守卫"限制。`file` 块不还原（客户端无文件字节读取通道）。**任意 slot 组件都能调**，只要自己拿 `ctx.sessions.scope(sessionId)`；参考仍包成 `setComposerText(sessionId,text)` 注入桥（`src/client/index.ts:306-313`），是为了共用"只填发生回退的那个主视图会话"的判断：`if (!isMainViewSession(session.sessionId)) return`（`src/client/portals.tsx:319-321`）——多窗口下必须有。
 
 两个坑：**事件驱动，绝不扫历史**（先 `session.command()` 再 `waitForCommand(...isExecutedRewindCommand(node,seq) && !known.has(node.seq))`，执行前采样排除旧节点，`260-357`）；**空 composer 守卫** `composerText().trim() !== '' 则 return`（`346-350`）。文本取自 chat snapshot 的 `user`/`steering` 节点，读 `nodes.values()`（含已隐藏节点）而**不是 `order`**（`src/client/hidden.ts:50-60,116-131`）。
 
 ## 4. 文件恢复经验
-
 **为什么绕开 fs 服务**（`src/index.ts:804-812` 原文）：restore 用裸 `node:fs`（`unlink`/`writeFile`/`copyFile`），"because it must also reach paths the service would refuse as stale/absent. That is safe only because the action set is the closed `planRestore`-derived one"。安全边界 = 闭集路径 + `lstat` 拒绝符号链接/硬链接（`nlink>1`）+ 目录 realpath pin（`SECURITY.md:104-120`、`docs/format.md` 的 `parent`），不是服务鉴权。
 
 **`syncRestoreObservations`（必抄）**（`src/index.ts:663-683`，理由 `636-656`）：
@@ -243,8 +227,7 @@ ctx.emit('fs/observed', target, { kind: 'present', version: (await fs.stat(targe
 | 装载准入 `engines.dsh` | `">=0.2.2-alpha.2 <0.3.0-0"`（`package.json:26`） | **不抄**：本机 0.2.1-rc.5 低于下界；DSH 读 `engines.dsh`（无则读 peers）按 `includePrerelease` 拒绝（本机 manifest 校验带 `requirements` 字段）。现状不声明即可。 |
 | 插件 store 格式号 / 会话格式迁移 | `CURRENT_STORE_VERSION=2`，更高版本 → `UnknownStoreVersionError` fail-closed；`setFormatVersion`+`reconcileFormatVersion` 在格式变化时丢弃旧快照（seq 会错位），且 `assertKnownStoreVersion` 必须先于对账（`src/index.ts:1330-1345`，顺序有讲究） | 抄（沿用自带归档格式时）；只做对话回退可跳过 |
 | subagent 会话 | 单一谓词 `isSubagentSession`（`src/index.ts:146`）跳过捕获/重查/cleanup；客户端 `isRewindInertSession`（`src/client/portals.tsx:500-502`） | 抄。本机依据：subagent 身份的通用 Session RPC 被拒（`session/agent-busy`），命令目录本身返回空 |
-| 命令被占 / 私有 seam | 注册失败只降级该名字（`src/index.ts:1273-1310`）；visibility 改 `uiConversation.views` 里 `target==='chat'` 的 `definition.create`，先形状检查、失败只记日志、卸载还原并按 `retainedBy` 重建（`src/client/visibility.ts:119-182`） | 抄。跨包类型全部本地结构化声明 + `ctx.get()` 懒解析，**不要** import 别家 UI 包的运行时代码 |
-| 设置卡片 / 快照自动清理 / 旧 marker 迁移命令 | `plugins.bundle.config`、`snapshot-auto-cleanup`、`/dsh-rewind-fix` | **跳过**（产品面/历史包袱） |
+| 命令被占 / 私有 seam / 可跳过的产品面 | 注册失败只降级该名字（`src/index.ts:1273-1310`）；visibility 改 `uiConversation.views` 里 `target==='chat'` 的 `definition.create`，先形状检查、失败只记日志、卸载还原并按 `retainedBy` 重建（`src/client/visibility.ts:119-182`）；设置卡片/自动清理/旧 marker 迁移命令（`plugins.bundle.config`、`snapshot-auto-cleanup`、`/dsh-rewind-fix`）本插件不需要 | 抄前两项；跨包类型全部本地结构化声明 + `ctx.get()` 懒解析，**不要** import 别家 UI 包的运行时代码；后三项**跳过** |
 
 ## 6. 本机 0.2.1-rc.5 与参考假设的冲突
 
@@ -254,8 +237,7 @@ ctx.emit('fs/observed', target, { kind: 'present', version: (await fs.stat(targe
 | surface 契约 | `SurfaceIntent` / `{op:'replace',startSeq,endSeq}` / 覆盖校验 | 同形，`applySurface`、`replaceRange`、`assertSourceEventReferences` 都在（`app.asar:1859506,1874978,1875028`） | 无差异，可照写 |
 | `MessageSourceMap` | merge 扩展、无 `plugin` 兜底 | 同（止于 `webhook`） | 必须 `declare module`；运行时宽容 |
 | Chat 隐藏撤施行 | 需 wrap builder（U3 未修） | 仍需：`isVisibleChatNode` 只认 `visibility==='visible'`，Chat 只按 append-origin 建行 | **必须实现客户端隐藏** |
-| 查询通道 | Connection RPC（`connection.rpc.handle`） | `connection` 在，但现有插件已有 same-origin 路由 | 复用 `/api/session-rewind.*`，少一个注入 |
-| slot props / `commandUi.decorate` | `{sessionId}` / popupSelect spec | 同（`app.asar:500347,500364,459984`） | 无差异 |
+| 查询通道 / slot props / `decorate` | Connection RPC；`{sessionId}` props；popupSelect spec | 路由可复用 same-origin `fetch`；props 与 spec 同形（`app.asar:500347,500364,459984`） | 复用 `/api/session-rewind.*`，少一个 `connection` 注入 |
 
 ## 7. 落地顺序
 
@@ -263,7 +245,6 @@ ctx.emit('fs/observed', target, { kind: 'present', version: (await fs.stat(targe
 2. **Host 命令与执行体**：`rewind` + `undo` 别名 + 带 `input.hint` 的引擎命令（成功回 `sourceEventSeq`）；执行顺序 = in-flight → `cancel`+`whenIdle()` race → `dropPendingSteering` → 重新 plan → append →（可选）文件恢复 → 文案。
 3. **Host 路由**：现有 `lib/route.js` 加 `candidates` 与 `plan`（返回 `{targetSeq, files:[{path,action}], backupOff}`），沿用 `trustedHosts`。
 4. **Client 选择器**：header 入口列表 + `commandUi.decorate`（`package.json` 的 `dsh.client.inject` 需加 `@deepseek-ai/dsh-client-ui-commands`）→ 发引擎命令。
-5. **Client 行内按钮**：注册 header slot 的只门户桥 + `actionsContainerOf` + 三路刷新合并。
-6. **Client hide 层**：wrap `chat` builder 的 `create`，按 cut `{target,marker}` 置 `visibility:'hidden'`，卸载还原并 `rebuild()`。
-7. **Client 回填**：`input.for(scope).setDraft` + `focus()`，图片 `readAttachment`→`createDrafts`→`addAttachments`；守卫主视图 + 空 composer。
-8. **验证四连**：裸 `/rewind` 开 picker；点 ↶ 选"仅对话"→ 旧行从 Chat 消失、Trajectory 仍在、composer 有原文；运行中点 ↶ → 取消后回退；回退后让模型重建被删文件 → **不应**出现 `FS_STALE_VERSION`（§4 的目的）。
+5. **Client 端口**：注册 header slot 的只门户桥 + `actionsContainerOf` + 三路刷新合并；再 wrap `chat` builder 的 `create`，按 cut `{target,marker}` 置 `visibility:'hidden'`，卸载还原并 `rebuild()`。
+6. **Client 回填**：`input.for(scope).setDraft` + `focus()`，图片 `readAttachment`→`createDrafts`→`addAttachments`；守卫主视图 + 空 composer。
+7. **验证四连**：裸 `/rewind` 开 picker；点 ↶ 选"仅对话"→ 旧行从 Chat 消失、Trajectory 仍在、composer 有原文；运行中点 ↶ → 取消后回退；回退后让模型重建被删文件 → **不应**出现 `FS_STALE_VERSION`（§4 的目的）。
