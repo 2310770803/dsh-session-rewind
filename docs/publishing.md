@@ -305,3 +305,17 @@ this check re-runs by itself"，**不要推空提交**，它的 `regate` 每 6 �
 
 合并后**不需要再做别的**：官方索引 `dsh-plugin-catalog`（jsDelivr 上的 `index.json`）由该目录生成，
 会自动收录；本仓库自己的 `index.json` 只在"目录合并前抢先可见"时有用。
+
+## 9. 发布状态（2026-11-01 实测）
+
+| 项 | 状态 |
+| --- | --- |
+| npm 包名 | `dsh-session-rewind`，维护者 `pinero` |
+| 首版 | `1.2.7`（本地 `npm publish`，无 provenance） |
+| OIDC 首版 | **`1.2.8`**：GitHub Actions 触发，`Signed provenance statement … from GitHub Actions`，签名日志 <https://search.sigstore.dev/?logIndex=3621634968>，registry 里 `dist.attestations.provenance` = SLSA v1 |
+| `latest` | `1.2.8`，19 个文件 / 206293 B 解包 |
+| Release tarball | `releases/latest/download/dsh-session-rewind.tgz`（不带版本号，HTTP 200） |
+| 遗留 | `0.0.0-stage` 是 npm 自己在配置暂存发布时创建的占位包（`stub: true`，340 B），`npm unpublish dsh-session-rewind@0.0.0-stage` 可清（需 2FA） |
+
+从 `1.2.8` 起，任何 `v*` tag 都会走第 7 节的 OIDC 任务发布并自动附 provenance；已存在的版本由
+`npm view` 探测自动跳过，重跑 tag 不会失败。
