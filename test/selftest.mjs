@@ -116,6 +116,25 @@ assert.deepEqual(payload.source, { kind: MARKER_SOURCE_KIND });
   assert.deepEqual(withdrawnTurns(events), []);
 }
 
+// --- two rewinds in one Session -------------------------------------------
+// Each marker withdraws its own span; the union is what must disappear. Missing
+// the second marker is what left the later turns on screen.
+{
+  const twice = [
+    { seq: 1, type: 'turn/start', data: { turn: 1 } },
+    { seq: 2, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'one' }] } },
+    { seq: 5, type: 'turn/end', data: { turn: 1 } },
+    { seq: 6, type: 'user/message', data: { source: { kind: MARKER_SOURCE_KIND } }, surfaceOp: { op: 'replace', startSeq: 2, endSeq: 5 } },
+    { seq: 7, type: 'turn/start', data: { turn: 2 } },
+    { seq: 8, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'two' }] } },
+    { seq: 11, type: 'turn/end', data: { turn: 2 } },
+    { seq: 12, type: 'user/message', data: { source: { kind: MARKER_SOURCE_KIND } }, surfaceOp: { op: 'replace', startSeq: 8, endSeq: 11 } },
+    { seq: 13, type: 'turn/start', data: { turn: 3 } },
+    { seq: 14, type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'three' }] } },
+  ];
+  assert.deepEqual(withdrawnTurns(twice), [1, 2]);
+}
+
 // --- archive -------------------------------------------------------------
 const root = await mkdtemp(join(tmpdir(), 'rewind-test-'));
 const archiveDir = join(root, 'archive');

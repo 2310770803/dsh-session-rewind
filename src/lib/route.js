@@ -22,6 +22,7 @@ export const INPLACE_PATH = '/api/session-rewind.inplace';
 export const CUTS_PATH = '/api/session-rewind.cuts';
 export const DIAGNOSE_PATH = '/api/session-rewind.diagnose';
 export const TAIL_PATH = '/api/session-rewind.tail';
+export const SURFACE_PATH = '/api/session-rewind.surface';
 export const SELFCHECK_PATH = '/api/session-rewind.selfcheck';
 
 /** A rewind request is a session id plus a Turn number or a seq. */
@@ -197,6 +198,58 @@ function targetOf(value) {
     throw new RequestBoundaryError(400, 'turn or seq is required');
   }
   return { sessionId, turn, seq };
+}
+
+/**
+ * Build the surface route.
+ *
+ * `planInPlace` refuses a rewind when the target Seq is not a node of the live
+ * Session's surface, so when a click is refused the only useful question is what
+ * that surface actually contains. This exposes it read-only.
+ *
+ * @param {{
+ *   surfaceOf: (sessionId: string) => { nodes?: readonly unknown[]; replaceGeneration?: number; contentGeneration?: number } | null,
+ *   trustedHosts?: () => readonly string[],
+ *   onError?: (error: unknown) => void,
+ * }} options
+ * @returns {(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => Promise<void>}
+ */
+export function createSurfaceHandler({ surfaceOf, trustedHosts = () => [], onError = () => {} }) {
+  return async (request, response) => {
+    try {
+      if (request.method !== 'POST') {
+        writeText(response, 405, 'method not allowed');
+        return;
+      }
+      if (!isTrustedRequest(request, hostsOf(trustedHosts))) {
+        writeText(response, 403, 'forbidden');
+        return;
+      }
+      const mediaType = header(request.headers, 'content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+      if (mediaType !== 'application/json') {
+        writeText(response, 415, 'content type must be application/json');
+        return;
+      }
+      const value = await readJsonBody(request);
+      if (!isRecord(value)) throw new RequestBoundaryError(400, 'request body must be a JSON object');
+      const sessionId = typeof value.sessionId === 'string' ? value.sessionId : '';
+      if (sessionId === '') throw new RequestBoundaryError(400, 'sessionId is required');
+      const live = surfaceOf(sessionId);
+      if (live === null) throw new RequestBoundaryError(409, 'this session is not open right now');
+      const nodes = Array.isArray(live.nodes) ? live.nodes.map((node) => (typeof node === 'number' ? node : null)) : [];
+      const tail = Number.isInteger(value.tail) && value.tail > 0 && value.tail <= 200 ? value.tail : 20;
+      writeJson(response, 200, {
+        ok: true,
+        count: nodes.length,
+        replaceGeneration: live.replaceGeneration ?? null,
+        contentGeneration: live.contentGeneration ?? null,
+        head: nodes.slice(0, 10),
+        tail: nodes.slice(-tail),
+      });
+    } catch (error) {
+      fail(response, error, onError);
+    }
+  };
 }
 
 /**

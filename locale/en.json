@@ -2,5 +2,6 @@
   "meta": {
     "title": "Session Rewind",
     "description": "Adds a rewind control to every finished Turn plus one entry in the session header. Pick a Turn to branch the conversation there into a new session, put that Turn's original prompt back in the composer so you can edit and resend it, and restore the workspace files that Turn changed to their pre-Turn content."
-  }
+  },
+  "notice.already": "That message was already rewound; its row is now hidden."
 }

@@ -29,6 +29,7 @@ import {
   CUTS_PATH,
   DIAGNOSE_PATH,
   INPLACE_PATH,
+  SURFACE_PATH,
   TAIL_PATH,
   PLAN_PATH,
   RESTORE_PATH,
@@ -37,6 +38,7 @@ import {
   createCutsHandler,
   createDiagnoseHandler,
   createInplaceHandler,
+  createSurfaceHandler,
   createTailHandler,
   createPlanHandler,
   createRestoreHandler,
@@ -595,7 +597,7 @@ export function apply(ctx) {
             plugin: 'dsh-session-rewind',
             archive: { directory: archive.directory, ...archiveStats },
             client: { discovered: clientPath !== null, path: clientPath },
-            routes: [SELFCHECK_PATH, DIAGNOSE_PATH, TAIL_PATH, CANDIDATES_PATH, INPLACE_PATH, CUTS_PATH, PLAN_PATH, RESTORE_PATH],
+            routes: [SELFCHECK_PATH, DIAGNOSE_PATH, TAIL_PATH, SURFACE_PATH, CANDIDATES_PATH, INPLACE_PATH, CUTS_PATH, PLAN_PATH, RESTORE_PATH],
           };
         },
         trustedHosts,
@@ -629,6 +631,12 @@ export function apply(ctx) {
         onError,
       });
 
+      const surfaceHandler = createSurfaceHandler({
+        surfaceOf: (sessionId) => liveAgentOf(ctx, sessionId)?.session?.surface ?? null,
+        trustedHosts,
+        onError,
+      });
+
       const tailHandler = createTailHandler({
         events: async (sessionId) => readEvents(ctx, sessionId),
         trustedHosts,
@@ -649,6 +657,10 @@ export function apply(ctx) {
         scope.effect(
           () => scope.webServer.register({ kind: 'exact', path: SELFCHECK_PATH, handler: statusHandler }),
           'session-rewind: selfcheck route',
+        );
+        scope.effect(
+          () => scope.webServer.register({ kind: 'exact', path: SURFACE_PATH, handler: surfaceHandler }),
+          'session-rewind: surface route',
         );
         scope.effect(
           () => scope.webServer.register({ kind: 'exact', path: TAIL_PATH, handler: tailHandler }),

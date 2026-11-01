@@ -172,34 +172,38 @@ export function hiddenFromTurn(events) {
 /**
  * Turns whose rows belong to a withdrawn stretch of the log.
  *
- * `hiddenFromSeq` gives the first withdrawn Seq, but the Chat view keys rows by
- * Turn, not Seq — and a plain "turn >= first" rule would also hide the turns the
- * user starts *after* rewinding. The exact set is the turns spanned by the events
- * in `[startSeq, markerSeq)`: everything the marker replaced, and nothing after it.
+ * A Session can be rewound more than once, and each rewind appends its own
+ * marker, so the withdrawn turns are the union over every marker of the turns
+ * spanned by `[surfaceOp.startSeq, markerSeq)`. Taking only the earliest marker —
+ * as the first version did — leaves the turns withdrawn later still on screen.
  *
  * @param {readonly unknown[]} events
  * @returns {readonly number[]}
  */
 export function withdrawnTurns(events) {
-  const startSeq = hiddenFromSeq(events);
-  if (startSeq === null) return [];
-  let markerSeq = null;
+  const spans = [];
   for (const event of events) {
     if (!isRecord(event) || event.type !== 'user/message') continue;
     if (event.data?.source?.kind !== MARKER_SOURCE_KIND) continue;
-    if (typeof event.seq === 'number' && (markerSeq === null || event.seq < markerSeq)) markerSeq = event.seq;
+    if (typeof event.seq !== 'number') continue;
+    const op = event.surfaceOp;
+    if (!isRecord(op) || op.op !== 'replace' || typeof op.startSeq !== 'number') continue;
+    spans.push({ from: op.startSeq, before: event.seq });
   }
-  if (markerSeq === null || markerSeq <= startSeq) return [];
+  if (spans.length === 0) return [];
   const turns = new Set();
   let current = null;
   for (const event of events) {
     if (!isRecord(event) || typeof event.seq !== 'number') continue;
     const turn = event.data?.turn;
-    if (Number.isInteger(turn) && event.type === 'turn/start') current = turn;
-    else if (Number.isInteger(turn) && event.type === 'turn/end') current = turn;
-    if (event.seq < startSeq) continue;
-    if (event.seq >= markerSeq) break;
-    if (Number.isInteger(current)) turns.add(current);
+    if (Number.isInteger(turn) && (event.type === 'turn/start' || event.type === 'turn/end')) current = turn;
+    if (!Number.isInteger(current)) continue;
+    for (const span of spans) {
+      if (event.seq >= span.from && event.seq < span.before) {
+        turns.add(current);
+        break;
+      }
+    }
   }
   return [...turns].sort((left, right) => left - right);
 }
