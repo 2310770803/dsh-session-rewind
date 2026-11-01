@@ -18,13 +18,20 @@ npm 上没有发布这个包（本机 `npm whoami` 返回 401，没有 npm 凭�
 用户要添加的索引源就是：
 
 ```
-https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json
+https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/index.json
 ```
 
-> 为什么用 jsDelivr 而不是 GitHub Pages：宿主给每个索引源的抓取时间只有 **15 秒**
-> （`fetchTimeoutMs` 默认 15000），并拒绝重定向；jsDelivr 是 CDN，比
-> `awesome-dsh-plugin.com` 这类 Pages 站点在部分网络下更稳。
-> `raw.githubusercontent.com/.../main/index.json` 也能用，但没有 CDN 加速。
+> **为什么首选 raw 而不是 jsDelivr。** 实测：`…@v1.1.1/index.json` 立刻是新的，但
+> `…@main/index.json` 在 jsDelivr 上会继续返回旧版本（branch 引用缓存最长 12 小时，
+> 连 `purge.jsdelivr.net` 也立刻清不掉）——用户会看到过期条目。raw 每次都是最新的，
+> 一个 ~2 KB 的 JSON 在 0.2 s 内返回，远低于宿主给索引源的 **15 秒**（`fetchTimeoutMs` 默认 15000）。
+> 如果网络访问 raw 不稳定，可以改用 CDN 形式：
+>
+> ```
+> https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@v1.1.1/index.json
+> ```
+>
+> 注意这是**钉到标签**的，换版本要改 URL；`@main` 形式则会滞后。
 
 ## 2. 怎么加索引源
 
@@ -72,7 +79,7 @@ C:\Users\23107\.dsh\profiles\desktop\cordis.patch.yml
 - id: plugin-market
   config:
     indexes:
-      - https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json
+      - https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/index.json
 ```
 
 证据链（全部来自运行中的 DSH 与本机 profile，而不是文档推测）：
@@ -223,7 +230,7 @@ node scripts/build-index.mjs --dry-run          # 只把文档打到 stdout，�
 
 1. jsDelivr 是否已经返回新内容：
    ```sh
-   curl -s https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json
+   curl -s https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/index.json
    ```
    没更新就去点一次
    `https://purge.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json`。

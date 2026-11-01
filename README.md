@@ -56,6 +56,14 @@ The two halves can be used together (`回退对话`) or separately
 
 ## Install · 安装
 
+**从插件市场安装（推荐）**：左侧 **插件 → 发现（Discover）** → **索引源** → 添加
+`https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/index.json`
+→ 搜索 `rewind` 或 `会话回退` → 安装。索引格式与发布流程见 [docs/publishing.md](docs/publishing.md)。
+
+本机（profile `desktop`）已把这个索引源写进 `cordis.patch.yml`，打开「发现」即可看到条目。
+
+**从源码目录安装**（本机当前就是这种方式）：
+
 ```js
 // plugin_manager
 { action: 'install_bundle', target: 'E:\\DeepSeek Harness\\dsh-session-rewind' }
