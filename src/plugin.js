@@ -27,12 +27,14 @@ import { restoreFile as restoreOne } from './lib/restore.js';
 import {
   CANDIDATES_PATH,
   CUTS_PATH,
+  DIAGNOSE_PATH,
   INPLACE_PATH,
   PLAN_PATH,
   RESTORE_PATH,
   SELFCHECK_PATH,
   createCandidatesHandler,
   createCutsHandler,
+  createDiagnoseHandler,
   createInplaceHandler,
   createPlanHandler,
   createRestoreHandler,
@@ -586,7 +588,7 @@ export function apply(ctx) {
             plugin: 'dsh-session-rewind',
             archive: { directory: archive.directory, ...archiveStats },
             client: { discovered: clientPath !== null, path: clientPath },
-            routes: [SELFCHECK_PATH, CANDIDATES_PATH, INPLACE_PATH, CUTS_PATH, PLAN_PATH, RESTORE_PATH],
+            routes: [SELFCHECK_PATH, DIAGNOSE_PATH, CANDIDATES_PATH, INPLACE_PATH, CUTS_PATH, PLAN_PATH, RESTORE_PATH],
           };
         },
         trustedHosts,
@@ -606,6 +608,20 @@ export function apply(ctx) {
         onError,
       });
 
+      /** Last few browser reports per Session, in memory only. */
+      const diagnostics = new Map();
+      const diagnoseHandler = createDiagnoseHandler({
+        remember: (sessionId, report) => {
+          const list = diagnostics.get(sessionId) ?? [];
+          list.push({ at: Date.now(), report });
+          while (list.length > 5) list.shift();
+          diagnostics.set(sessionId, list);
+        },
+        recall: (sessionId) => diagnostics.get(sessionId) ?? [],
+        trustedHosts,
+        onError,
+      });
+
       const cutsHandler = createCutsHandler({
         cutsOf,
         trustedHosts,
@@ -613,6 +629,10 @@ export function apply(ctx) {
       });
 
       try {
+        scope.effect(
+          () => scope.webServer.register({ kind: 'exact', path: DIAGNOSE_PATH, handler: diagnoseHandler }),
+          'session-rewind: diagnose route',
+        );
         scope.effect(
           () => scope.webServer.register({ kind: 'exact', path: SELFCHECK_PATH, handler: statusHandler }),
           'session-rewind: selfcheck route',

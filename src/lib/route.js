@@ -20,6 +20,7 @@ export const RESTORE_PATH = '/api/session-rewind.restore';
 export const CANDIDATES_PATH = '/api/session-rewind.candidates';
 export const INPLACE_PATH = '/api/session-rewind.inplace';
 export const CUTS_PATH = '/api/session-rewind.cuts';
+export const DIAGNOSE_PATH = '/api/session-rewind.diagnose';
 export const SELFCHECK_PATH = '/api/session-rewind.selfcheck';
 
 /** A rewind request is a session id plus a Turn number or a seq. */
@@ -195,6 +196,54 @@ function targetOf(value) {
     throw new RequestBoundaryError(400, 'turn or seq is required');
   }
   return { sessionId, turn, seq };
+}
+
+/**
+ * Build the browser-diagnostics route.
+ *
+ * The Web half cannot be inspected from the Host, so the page reports what it
+ * actually sees (how many chat rows exist, which attributes they carry, and any
+ * error the per-message bridge hit). It keeps the last few reports per Session in
+ * memory — never on disk — and they contain no message text.
+ *
+ * @param {{
+ *   remember: (sessionId: string, report: unknown) => void,
+ *   recall: (sessionId: string) => readonly unknown[],
+ *   trustedHosts?: () => readonly string[],
+ *   onError?: (error: unknown) => void,
+ * }} options
+ * @returns {(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) => Promise<void>}
+ */
+export function createDiagnoseHandler({ remember, recall, trustedHosts = () => [], onError = () => {} }) {
+  return async (request, response) => {
+    try {
+      if (request.method !== 'POST') {
+        writeText(response, 405, 'method not allowed');
+        return;
+      }
+      if (!isTrustedRequest(request, hostsOf(trustedHosts))) {
+        writeText(response, 403, 'forbidden');
+        return;
+      }
+      const mediaType = header(request.headers, 'content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+      if (mediaType !== 'application/json') {
+        writeText(response, 415, 'content type must be application/json');
+        return;
+      }
+      const body = await readJsonBody(request);
+      if (!isRecord(body)) throw new RequestBoundaryError(400, 'request body must be a JSON object');
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      if (sessionId === '') throw new RequestBoundaryError(400, 'sessionId is required');
+      if (body.read === true) {
+        writeJson(response, 200, { ok: true, reports: recall(sessionId) });
+        return;
+      }
+      remember(sessionId, body.report);
+      writeJson(response, 200, { ok: true });
+    } catch (error) {
+      fail(response, error, onError);
+    }
+  };
 }
 
 /**
