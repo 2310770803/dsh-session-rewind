@@ -1,0 +1,9 @@
+# Add one dual-face plugin row to the Web profile.
+#
+# The Host half (src/index.js) archives the pre-Turn content of every workspace
+# file a Turn mutates and serves the two rewind routes; dsh.client discovers the
+# browser half from this same package manifest and mounts a rewind control in
+# the Chat turn tail of every finished Turn.
+- insert:
+    - id: session-rewind
+      name: dsh-session-rewind

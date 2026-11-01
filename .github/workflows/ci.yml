@@ -1,0 +1,100 @@
+name: CI
+
+# The package has no dependencies and no build step, so CI is: parse every
+# JavaScript file, run the three shipped suites, and prove the committed
+# market index still describes package.json. Node 20 is the declared floor
+# (`engines.node`), Node 22 is the current LTS; both are tested because the
+# browser half is plain ESM loaded by the host.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `scripts/build-index.mjs --check` rebuilds the index for the commit
+          # index.json pins; that commit must exist in the object database.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # A syntax error in a file no suite imports is the one failure mode the
+      # tests cannot see. Node 20's `--check` can parse a bare `.js` as
+      # CommonJS before consulting package.json, so a failure is retried on a
+      # `.mjs` copy, which forces the ESM grammar instead of reporting a broken
+      # file.
+      - name: Syntax-check every JavaScript file
+        run: |
+          set -euo pipefail
+          status=0
+          while IFS= read -r file; do
+            echo "check ${file}"
+            if ! node --check "${file}" 2>/dev/null; then
+              cp "${file}" "${RUNNER_TEMP}/check.mjs"
+              node --check "${RUNNER_TEMP}/check.mjs" || status=1
+            fi
+          done < <(find src lib scripts test -type f \( -name '*.js' -o -name '*.mjs' \) | sort)
+          exit "${status}"
+
+      - name: Run the package's own test suites
+        run: |
+          node test/selftest.mjs
+          node test/route-smoke.mjs
+          node test/client-smoke.mjs
+
+      - name: Check the manifest, locales and market index
+        run: |
+          node --input-type=commonjs -e '
+            const fs = require("fs")
+            const fail = (why) => { console.error("manifest check: " + why); process.exit(1) }
+            const read = (path) => JSON.parse(fs.readFileSync(path, "utf8"))
+            const pkg = read("package.json")
+            if (pkg.name !== "dsh-session-rewind") fail("package name changed")
+            if (!/^[0-9]+\.[0-9]+\.[0-9]+/.test(pkg.version)) fail("package version is not SemVer")
+            if (pkg.type !== "module") fail("package must stay type module")
+            if (pkg.license !== "MIT") fail("license must stay MIT")
+            if (!pkg.dsh || !pkg.dsh.bundle || !pkg.dsh.bundle.patch) fail("package.json declares no dsh.bundle.patch")
+            if (!fs.existsSync(pkg.dsh.bundle.patch)) fail("bundle patch file " + pkg.dsh.bundle.patch + " is missing")
+            for (const locale of ["en", "zh"]) {
+              const meta = read("locale/" + locale + ".json").meta
+              if (!meta || !meta.title || !meta.description) fail("locale/" + locale + ".json lacks meta.title/description")
+            }
+            if (!/^\s*<svg[\s>]/.test(fs.readFileSync("icon.svg", "utf8"))) fail("icon.svg is not an SVG")
+            if (!fs.readFileSync("cordis.patch.yml", "utf8").includes("dsh-session-rewind")) fail("cordis.patch.yml does not insert this package")
+            const index = read("index.json")
+            if (index.format !== 1) fail("index.json is not format 1")
+            if (!index.plugins || index.plugins.length !== 1) fail("index.json must describe exactly one plugin")
+            const plugin = index.plugins[0]
+            if (plugin.name !== pkg.name) fail("index plugin name != package name")
+            if (!plugin.versions || plugin.versions.length !== 1) fail("index must carry exactly one version")
+            const version = plugin.versions[0]
+            if (version.version !== pkg.version) fail("index version " + version.version + " != package.json " + pkg.version + " (run node scripts/build-index.mjs)")
+            if (!version.source || version.source.type !== "git") fail("index source must be git")
+            if (!/^[0-9a-f]{40}$/.test(version.source.commit || "")) fail("index source commit must be a 40-hex SHA")
+            if (!/^https:\/\//.test(version.source.url)) fail("index source url must be https")
+            if (!/^https:\/\//.test(plugin.icon || "")) fail("index icon must be an https URL")
+            console.log("manifest, locales and index are consistent (" + pkg.name + "@" + pkg.version + " pinned at " + version.source.commit + ")")
+          '
+
+      # One matrix leg is enough: the result cannot differ by Node version, and
+      # a failing leg tells the author exactly the same thing.
+      - name: The committed index matches the manifest and locales
+        if: matrix.node == '22'
+        run: node scripts/build-index.mjs --check

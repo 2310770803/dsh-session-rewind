@@ -1,0 +1,63 @@
+{
+  "name": "dsh-session-rewind",
+  "version": "1.1.0",
+  "type": "module",
+  "description": "Rewind a finished Turn: branch the conversation at any Turn (session header or per-Turn control) and restore every workspace file that Turn changed. · 回合回退：从任意已完成的回合重新开始，并把该回合改动过的工作区文件恢复原状。",
+  "icon": "./icon.svg",
+  "license": "MIT",
+  "author": "2310770803",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/2310770803/dsh-session-rewind.git"
+  },
+  "homepage": "https://github.com/2310770803/dsh-session-rewind#readme",
+  "bugs": {
+    "url": "https://github.com/2310770803/dsh-session-rewind/issues"
+  },
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "locale",
+    "lib/client.js",
+    "src/**/*.js",
+    "test"
+  ],
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "rewind",
+    "rollback",
+    "checkpoint",
+    "branch",
+    "session",
+    "file-restore"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web",
+      "immediately": true
+    },
+    "manifestVersion": 1
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

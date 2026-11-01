@@ -1,0 +1,172 @@
+name: Release
+
+# A tag-driven release for a plugin that is deliberately NOT published to npm.
+#
+# npm has no credential for this project (npm whoami -> 401), so the plugin is
+# distributed through the format-1 DSH plugin market index instead: `index.json`
+# carries a Git source pinned to the release commit, and DSH's
+# Plugins -> Discover tab installs straight from that commit.
+#
+# Three things happen on a `v*.*.*` tag:
+#   1. the index is regenerated pinned to the tagged commit (deterministic, and
+#      `--check` proves the file is exactly what the generator writes);
+#   2. the refreshed index is committed back to `main`, because the index source
+#      users add is https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json
+#      — jsDelivr serves the branch, so `main` is the live document;
+#   3. a GitHub Release is created from the reviewed CHANGELOG.md section and
+#      gets two stable-named assets: `index.json` and an offline tarball.
+#
+# Cut releases from `main` HEAD: the tag commit must be the commit `main` points
+# at, because step 2 pushes to `main`. workflow_dispatch runs everything except
+# the tag-gated steps, which is the dry run.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  # Pushing the refreshed index back to main and creating the release.
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The index pins a commit, so the whole history must be present.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify tag, package version and main
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          echo "tag ${GITHUB_REF_NAME}, package version ${version}, commit ${GITHUB_SHA}"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
+          if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then
+            echo "::error::checkout HEAD is not the tagged commit"
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if [ "$(git rev-parse FETCH_HEAD)" != "${GITHUB_SHA}" ]; then
+            echo "::error::main has moved past ${GITHUB_REF_NAME}; cut releases from main HEAD"
+            exit 1
+          fi
+
+      - name: Run the package's own test suites
+        run: |
+          node test/selftest.mjs
+          node test/route-smoke.mjs
+          node test/client-smoke.mjs
+
+      - name: Regenerate the market index for this release
+        run: node scripts/build-index.mjs --commit "${GITHUB_SHA}"
+
+      - name: Verify the index is exactly what the generator produces
+        run: node scripts/build-index.mjs --check --commit "${GITHUB_SHA}"
+
+      - name: Validate the release index
+        run: |
+          node --input-type=commonjs -e '
+            const fs = require("fs")
+            const fail = (why) => { console.error("release index: " + why); process.exit(1) }
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"))
+            const index = JSON.parse(fs.readFileSync("index.json", "utf8"))
+            if (index.format !== 1) fail("format is not 1")
+            if (!index.plugins || index.plugins.length !== 1) fail("expected exactly one plugin")
+            const plugin = index.plugins[0]
+            const version = (plugin.versions || [])[0]
+            if (plugin.name !== pkg.name) fail("plugin name mismatch")
+            if (!version || version.version !== pkg.version) fail("version mismatch")
+            if (!version.source || version.source.type !== "git") fail("source is not git")
+            if (version.source.commit !== process.env.GITHUB_SHA) fail("index is not pinned to the release commit")
+            console.log("release index: " + plugin.name + "@" + version.version + " pinned at " + version.source.commit)
+          '
+
+      - name: Extract the release notes from CHANGELOG.md
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          awk -v heading="## [${version}]" '
+            index($0, heading) == 1 { capture = 1; next }
+            capture && index($0, "## [") == 1 { exit }
+            capture { print }
+          ' CHANGELOG.md > "${RUNNER_TEMP}/release-notes.md"
+          if [ ! -s "${RUNNER_TEMP}/release-notes.md" ]; then
+            echo "::error::CHANGELOG.md has no \"## [${version}]\" section with release notes"
+            exit 1
+          fi
+          cat "${RUNNER_TEMP}/release-notes.md"
+
+      # This is what actually updates the index source users configured: the
+      # pinned commit stays the release commit, and jsDelivr re-reads `main`.
+      # The push is a fast-forward because the tag was verified against main.
+      - name: Commit the refreshed index back to main
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- index.json; then
+            echo "index.json is already current"
+          else
+            git add index.json
+            git commit -m "chore(index): regenerate for ${GITHUB_REF_NAME}" -m "Pins the market index to ${GITHUB_SHA}."
+            git push origin HEAD:main
+          fi
+
+      - name: Create or refresh the GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "release ${GITHUB_REF_NAME} already exists; refreshing its assets"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --notes-file "${RUNNER_TEMP}/release-notes.md" \
+              --latest
+          fi
+
+      # Asset names are version-free on purpose: a
+      # releases/latest/download/<name> URL then survives every release.
+      - name: Attach the market index and an offline tarball
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `npm pack` needs no registry: there are no dependencies and no build.
+          npm pack --pack-destination .
+          version="$(node -p 'require("./package.json").version')"
+          mv "dsh-session-rewind-${version}.tgz" dsh-session-rewind.tgz
+          gh release upload "${GITHUB_REF_NAME}" index.json dsh-session-rewind.tgz \
+            --repo "${GITHUB_REPOSITORY}" --clobber
+
+      - name: Print the index source to share
+        run: |
+          echo "Index source for Plugins -> Discover -> Index sources:"
+          echo "https://cdn.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json"
+          echo "If Discover still serves an older document, purge the CDN copy:"
+          echo "https://purge.jsdelivr.net/gh/2310770803/dsh-session-rewind@main/index.json"

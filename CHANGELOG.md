@@ -1,0 +1,63 @@
+# 更新日志
+
+本文件记录用户可见的变更。索引如何生成、版本如何发布，见 [docs/publishing.md](docs/publishing.md)。
+
+版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)；`.github/workflows/publish.yml`
+会从本文件抽取与标签同名的小节作为 GitHub Release 正文，因此每个 `v*.*.*`
+标签都必须在下面有一个 `## [<version>]` 小节。
+
+## [Unreleased]
+
+## [1.1.0] - 2026-11-01
+
+**首个公开版本。** 通过 Git 源 + format-1 插件市场索引分发，不经 npm。
+
+### 新增
+
+- **每个已完成回合的回退按钮**（`conversation.chat.turnTail`）：点开面板即可回退该回合，
+  勾选要恢复的文件，并选择「回退对话」「仅恢复文件」或两者都做。
+- **会话标题栏的回退总入口**（`conversation.session.header.actions`）：列出本会话所有可回退的回合
+  （第 N 轮 + 提问预览 + 该回合改动文件数），支持 ↑↓ 选择、Enter 确认、Esc 返回，不用翻回那一轮。
+- **回退对话**：通过官方 `sessions.fork({ sessionId, atSeq })` 在该回合的 `turn/end` 处
+  分叉出一个新会话并打开它；原回合的用户输入会预填进新会话的输入框，可以直接改完重发，原会话不受影响。
+- **恢复文件**：回合运行期间，经 DSH 文件系统服务写入的文件都会在**写入前**抓取原始字节存档；
+  勾选的文件被恢复为修改前的内容，该回合新建的文件被删除。
+- **四态 Host 路由**：`/api/session-rewind.selfcheck` 只读自检、计划与恢复接口，
+  全部是 loopback + 同源 `/api` 路由，走 DSH Web 自带的 Host/Origin 信任栅栏。
+- **中英双语**：面板与插件列表文案跟随 DSH locale 服务。
+
+### 兼容性
+
+- DSH Web 双面 Cordis 插件（Host `src/` + Web `lib/client.js`），随 profile 的插件列表安装。
+- 已在 DSH `0.2.1-rc.5` 的 desktop profile 上实际安装并验证。
+- `package.json` 目前只声明 `engines.node >= 20`，没有声明 `engines.dsh`；
+  因此插件市场索引也不会声明 DSH 版本区间（见 docs/publishing.md「已知空缺」）。
+- `node --check` 与测试脚本需要 Node.js >= 20；插件运行时本身不额外要求 Node 版本。
+
+### 已知限制
+
+- 只捕获经过 DSH 文件系统服务（`fs/write-intent` / `fs/edit-intent`）的写入。
+  shell 命令、`git` 操作，以及回合之外发生的改动不会入档，因此也无法恢复。
+- 绕过写意图瀑布的工具（例如 Office 工具 `word_create` / `excel_update`）直接调用文件系统服务，
+  它们产出的 `.docx` / `.xlsx` 不入档，无法回退；经 `write` / `edit` 工具编辑的文本、
+  Markdown 与源码在覆盖范围内。
+- 每个回合最多快照 200 个文件，单个 pre-image 上限 2 MiB；超限文件会标记为「不可恢复」，
+  而不是被静默跳过。
+- `.git` 目录内的文件永不捕获，避免恢复破坏仓库。
+- 存档只保留最近 400 个回合，更早的记录连同 blob 一起清理。
+- 恢复只把记录的内容写回：不重跑任何命令，也不会删除回合只是**修改**过的文件。
+- 插件发起的写入没有 Agent 上下文，`fs` 服务默认拒绝。恢复时会按该回合自身的工作区重建策略
+  （`workspace-write`），只有存档记录在外的路径才放宽到 `danger-full-access`。
+- 捕获从插件挂载时打开的回合开始：安装时已在运行的回合会从实时日志尾部补齐，
+  但比回合首次写入更晚加载的插件看不到更早的改动。
+- 面板文案跟随 DSH locale 服务；仓库自带中文与英文词典。
+
+### 测试
+
+```
+node test/selftest.mjs      # 回合定位、提问提取、存档、恢复器
+node test/route-smoke.mjs   # 全部路由、信任栅栏、路径白名单
+node test/client-smoke.mjs  # Web 半边：两个 slot、面板、候选列表、fork、草稿
+```
+
+三个套件都不需要浏览器，也不需要 profile；CI 在 Node 20 / 22 上各跑一遍。

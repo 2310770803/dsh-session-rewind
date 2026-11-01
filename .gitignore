@@ -1,0 +1,14 @@
+# Dependencies (none required, but a local `npm install` may create this)
+node_modules/
+
+# Package-manager and build artifacts
+*.tgz
+*.tmp
+.tmp/
+coverage/
+
+# Machine-local
+.DS_Store
+Thumbs.db
+*.log
+.dsh-session-rewind-backup/
