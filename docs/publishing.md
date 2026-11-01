@@ -262,3 +262,46 @@ node scripts/build-index.mjs --dry-run          # 只把文档打到 stdout，�
   `engines.dsh`（或锁步的 `@deepseek-ai/dsh-*` peer），重新生成即可，脚本会自动带上。
 - **一个索引只能被一个「发现」页消费。** 索引源按 URL 去重；重复添加同一个 URL 会被拒绝。
 - **重定向会被拒绝。** 索引必须能以配置的最终 URL 直接访问。
+
+## 7. 发布到 npm（Trusted Publishing，一次性手动配置）
+
+包名 `dsh-session-rewind` 当前**未被占用**（`npm view dsh-session-rewind version` → E404）。
+
+npm 侧（只能由账号持有人在网页上做一次）：
+
+1. npmjs.com → **Access** → **Trusted Publisher** → 添加 **GitHub**；
+2. Repository 填 `2310770803/dsh-session-rewind`，Workflow filename 填 **`publish.yml`**；
+   包还没发布过时用 **pending publisher** 的形式登记同样的值。
+
+仓库侧（配置完再打开，避免 CI 变红）：
+
+```sh
+gh variable set NPM_TRUSTED_PUBLISHING --body true
+```
+
+`.github/workflows/publish.yml` 里的 `npm` 任务由这个变量控制，未设置时整段跳过，所以
+Release 与 tarball 链路始终可用。该任务：Node **24**（自带 npm ≥ 11.5.1）、断言 npm 版本、
+`id-token: write` 走 OIDC、发布前 `npm view` 幂等跳过、`--provenance` 附来源证明，**不使用任何 token**。
+
+> 发布后 registry 有 1–3 分钟延迟：`+ pkg@x.y.z` 打印成功不等于立刻能 `npm install`。
+
+## 8. 提交社区目录（awesome-dsh-plugin）
+
+一个 PR 一个文件：`data/plugins/2310770803__dsh-session-rewind.yml`，字段为
+`url` / `name` / `category: session` / `description.{en,zh}` / `icon`（GitHub 托管的
+`assets/icon-180.png`，目录只收位图）/ `tarball`（Release 里不带版本号的 `dsh-session-rewind.tgz`）。
+不写 `npm:` 字段（会自动从 registry 采集，手写会被校验拒绝）。
+
+提交前用官方校验器本地过一遍（会跑它们 CI 的同一段逻辑）：
+
+```sh
+git -C <catalog-clone> add data/plugins/2310770803__dsh-session-rewind.yml
+git -C <catalog-clone> commit -m "Add 2310770803/dsh-session-rewind"
+GITHUB_TOKEN="$(gh auth token)" node <catalog-clone>/scripts/check-submission.mjs --base origin/main
+```
+
+**已知门槛**：仓库创建满 **1 天**。被它挡住时 gate 会写 "repository is N days old (needs 1) —
+this check re-runs by itself"，**不要推空提交**，它的 `regate` 每 6 小时自动重跑。
+
+合并后**不需要再做别的**：官方索引 `dsh-plugin-catalog`（jsDelivr 上的 `index.json`）由该目录生成，
+会自动收录；本仓库自己的 `index.json` 只在"目录合并前抢先可见"时有用。
