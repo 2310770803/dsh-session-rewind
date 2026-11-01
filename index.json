@@ -1,0 +1,66 @@
+{
+  "format": 1,
+  "title": {
+    "en": "dsh-session-rewind",
+    "zh": "dsh-session-rewind"
+  },
+  "description": {
+    "en": "A single-plugin index, so Plugins -> Discover and the plugin_market tool can list and install dsh-session-rewind without npm.",
+    "zh": "单插件索引：不经过 npm，也能在「插件 → 发现」和 plugin_market 工具里浏览并安装 dsh-session-rewind。"
+  },
+  "metadata": {
+    "categories": {
+      "session": {
+        "title": {
+          "en": "Sessions",
+          "zh": "会话"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-session-rewind",
+      "title": {
+        "en": "Session Rewind",
+        "zh": "会话回退"
+      },
+      "description": {
+        "en": "Adds a rewind control to every finished Turn plus one entry in the session header. Pick a Turn to branch the conversation there into a new session, put that Turn's original prompt back in the composer so you can edit and resend it, and restore the workspace files that Turn changed to their pre-Turn content.",
+        "zh": "在每个已完成的回合旁加一个回退按钮，并在会话标题栏提供总入口：选中某个回合即可把对话从该回合处分叉成新会话，把该回合原本的输入放回输入框以便修改后重发，同时把该回合改动过的工作区文件恢复到修改前的内容。"
+      },
+      "icon": "https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/icon.svg",
+      "author": "2310770803",
+      "homepage": "https://github.com/2310770803/dsh-session-rewind#readme",
+      "repository": {
+        "url": "https://github.com/2310770803/dsh-session-rewind"
+      },
+      "metadata": {
+        "category": "session",
+        "keywords": [
+          "deepseek",
+          "harness",
+          "dsh",
+          "dsh-plugin",
+          "rewind",
+          "rollback",
+          "checkpoint",
+          "branch",
+          "session",
+          "file-restore"
+        ]
+      },
+      "versions": [
+        {
+          "version": "1.1.0",
+          "publishTimestamp": 1793499775,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/2310770803/dsh-session-rewind",
+            "commit": "bd98ec95a4aa442801a4497abb32eec57bc1c913"
+          }
+        }
+      ]
+    }
+  ]
+}
