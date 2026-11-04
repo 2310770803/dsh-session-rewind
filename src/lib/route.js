@@ -389,6 +389,7 @@ export function createDiagnoseHandler({ remember, recall, trustedHosts = () => [
 export function createInplaceHandler({
   describe,
   execute,
+  edit = async () => { throw new Error('edit is unavailable'); },
   trustedHosts = () => [],
   onError = () => {},
 }) {
@@ -413,6 +414,11 @@ export function createInplaceHandler({
       if (sessionId === '') throw new RequestBoundaryError(400, 'sessionId is required');
       if (!Number.isInteger(body.seq) || body.seq < 0) {
         throw new RequestBoundaryError(400, 'seq must be a non-negative integer');
+      }
+      if (body.edit === true) {
+        const result = await edit(sessionId, body.seq);
+        writeJson(response, 200, { ok: true, edit: true, ...result });
+        return;
       }
       if (body.dryRun === true) {
         const plan = await describe(sessionId, body.seq);
@@ -519,7 +525,7 @@ export function createCandidatesHandler({
       if (sessionId === '') throw new RequestBoundaryError(400, 'sessionId is required');
       const limit = Number.isInteger(value.limit) && value.limit > 0 && value.limit <= 200 ? value.limit : 50;
       const turns = await listTurns(sessionId, limit);
-      writeJson(response, 200, { ok: true, turns });
+      writeJson(response, 200, { ok: true, ...(Array.isArray(turns) ? { turns } : turns) });
     } catch (error) {
       fail(response, error, onError);
     }

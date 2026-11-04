@@ -44,7 +44,7 @@ import {
   createRestoreHandler,
   createSelfcheckHandler,
 } from './lib/route.js';
-import { describeInPlace, executeInPlace, liveAgentOf } from './lib/inplace.js';
+import { describeInPlace, executeEdit, executeInPlace, liveAgentOf } from './lib/inplace.js';
 import { hiddenFromSeq, hiddenFromTurn, withdrawnTurns } from './lib/surface.js';
 
 export const name = 'session-rewind';
@@ -391,6 +391,17 @@ export function apply(ctx) {
        * This is the in-place rewind target: the marker replaces it and every
        * surface node after it.
        */
+      const userMessageOfActive = (events, turn) => {
+        let inside = false;
+        for (const event of events) {
+          if (!isRecord(event)) continue;
+          if (event.type === 'turn/start' && event.data?.turn === turn) { inside = true; continue; }
+          if (!inside || event.type !== 'user/message') continue;
+          if (event.data?.source?.kind === 'user' && typeof event.seq === 'number') return event;
+        }
+        return null;
+      };
+
       const userMessageOf = (events, turn) => {
         let inside = false;
         for (const event of events) {
@@ -470,6 +481,7 @@ export function apply(ctx) {
 
       const describeInPlaceFor = (sessionId, seq) => describeInPlace(liveSession(sessionId), seq);
 
+      const executeEditFor = (sessionId, seq) => executeEdit({ ctx, sessionId, seq, readEvents: (id) => readEvents(ctx, id) });
       const executeInPlaceFor = (sessionId, seq, restoreFiles) => executeInPlace({
         ctx,
         sessionId,
@@ -503,7 +515,7 @@ export function apply(ctx) {
           if (event.type !== 'turn/end') continue;
           const turn = event.data?.turn;
           if (!Number.isInteger(turn)) continue;
-          ends.push({ turn, seq: typeof event.seq === 'number' ? event.seq : null });
+          ends.push({ turn, seq: typeof event.seq === 'number' ? event.seq : null, reason: event.data?.reason?.kind });
         }
         const candidates = [];
         for (const end of ends.reverse()) {
@@ -519,6 +531,7 @@ export function apply(ctx) {
           candidates.push({
             turn: end.turn,
             seq: end.seq,
+            edit: end.reason !== 'completed',
             userSeq: userMessage === null ? null : userMessage.seq,
             prompt: userPromptOf(events, end.turn),
             files: {
@@ -527,7 +540,13 @@ export function apply(ctx) {
             },
           });
         }
-        return candidates;
+        const active = [];
+        const openTurn = openTurns.get(sessionId) ?? openTurnOf(liveAgentOf(ctx, sessionId)?.session);
+        if (Number.isInteger(openTurn)) {
+          const user = userMessageOfActive(events, openTurn);
+          if (user) active.push({ turn: openTurn, userSeq: user.seq, prompt: textOfContent(user.data?.content), edit: true });
+        }
+        return { turns: candidates, active };
       };
 
       const trustedHosts = () => {
@@ -613,6 +632,7 @@ export function apply(ctx) {
       const inplaceHandler = createInplaceHandler({
         describe: describeInPlaceFor,
         execute: executeInPlaceFor,
+        edit: executeEditFor,
         trustedHosts,
         onError,
       });

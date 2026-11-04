@@ -219,3 +219,18 @@ export async function executeInPlace({
 }
 
 export const noopForTests = noop;
+
+/** Stop an active Turn and return its original user text for editing. */
+export async function executeEdit({ ctx, sessionId, seq, readEvents, timeoutMs = IDLE_TIMEOUT_MS }) {
+  const agent = liveAgentOf(ctx, sessionId);
+  if (agent === undefined) { const e = new Error('this session is not live'); e.status = 409; throw e; }
+  const session = agent.session;
+  const events = typeof readEvents === 'function' ? await readEvents(sessionId) : [];
+  const target = events.find((event) => event?.seq === seq);
+  if (!target || target.data?.source?.kind !== 'user') { const e = new Error('that message is not editable'); e.code = 'not-a-user-message'; throw e; }
+  if (agent.status !== 'idle') {
+    try { agent.cancel?.({ kind: 'user' }, { keepInbox: true }); } catch {}
+    if (!(await waitForIdle(agent, timeoutMs))) { const e = new Error('the running Turn did not stop in time'); e.status = 409; throw e; }
+  }
+  return { targetSeq: seq, prompt: textOf(target.data?.content) };
+}
