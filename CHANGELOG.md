@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-04
+
+**维护：客户端收敛到消息级桥接，移除已下线的 header/turn-tail 面板代码。**
+
+- `lib/client.js` 从 1812 行减至约 950 行：删除不可达的旧面板、分叉 UI、旧 draft seeding 和对应 CSS/翻译；保留 turn-tail 的不可见 bridge host。
+- 候选与 cut 请求采用递增 request id，较旧的慢响应不再覆盖新状态。
+- 同一 Session 的编辑/回退请求加 busy guard，按钮在处理中禁用，避免双 marker/重复文件恢复。
+- dispose 后完成的编辑请求不再写回旧 Session 的输入框。
+- 修正 `notice()` 的 persistDraft 早退：原逻辑会导致成功/失败提示被整个跳过。
+- 清理未使用的测试导出/脚本，更新中英文 README 与参考文档的当前 UI 说明。
+
+
 ## [1.5.3] - 2026-11-04
 
 **修复：编辑按钮 tooltip 显示原始英文 key。**

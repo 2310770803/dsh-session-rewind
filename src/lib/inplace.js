@@ -15,7 +15,6 @@ import { hiddenFromSeq, markerPayload, planInPlace, textOf, withdrawnTurns } fro
 /** Waiting budget for a cancelled Turn to reach quiescence. */
 const IDLE_TIMEOUT_MS = 20_000;
 
-const noop = () => {};
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -219,7 +218,6 @@ export async function executeInPlace({
   };
 }
 
-export const noopForTests = noop;
 
 /** Stop an active Turn and return its original user text for editing. */
 export async function executeEdit({ ctx, sessionId, seq, readEvents, timeoutMs = IDLE_TIMEOUT_MS }) {

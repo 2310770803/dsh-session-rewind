@@ -1,3 +1,5 @@
+> **Current implementation note (v1.5.x):** The shipped UI intentionally registers only a hidden `conversation.chat.turnTail` host. The visible action is injected on each user-message row: completed Turns use ↶; active/stopped Turns use a pencil that stops, replaces the original surface segment, and refills the composer. The old header portal and visible turn-tail panel described below are historical design notes, not current entry points.
+
 # 就地回退（in-place rewind）实现契约
 
 - **参考实现** `E:\DeepSeek Harness\.ref-dsh-rewind`（`dsh-rewind` v0.20.0-alpha.1，SiriLee）。下文路径相对该目录，`file:line` 为其真实行号。

@@ -199,164 +199,25 @@ assert.equal(typeof localeEntries[0].dictionaries.zh, 'object');
 assert.equal(typeof localeEntries[0].dictionaries.en, 'object');
 //#endregion
 
-//#region render, plan, fork
-const childId = 'session-child-9';
-const fetchCalls = [];
-globalThis.fetch = async (route, init) => {
-  const body = JSON.parse(init.body);
-  fetchCalls.push({ route, body });
-  if (route === '/api/session-rewind.plan') {
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        ok: true,
-        turn: 3,
-        seq: 12,
-        prompt: '把登录页改成深色主题',
-        files: [
-          { path: 'E:/work/app/login.tsx', displayPath: 'app/login.tsx', action: 'restore', size: 42 },
-          { path: 'E:/work/app/new.css', displayPath: 'app/new.css', action: 'delete', size: 8 },
-        ],
-      }),
-    };
-  }
-  if (route === '/api/session-rewind.restore') {
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        ok: true,
-        turn: 3,
-        results: (body.paths ?? []).map((path) => ({ path, status: 'restored' })),
-      }),
-    };
-  }
-  if (route === '/api/session-rewind.candidates') {
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        ok: true,
-        turns: [
-          { turn: 2, seq: 28, userSeq: 21, prompt: '第二条提问：把登录页改成深色主题', files: { count: 2, restorable: 2 } },
-          { turn: 1, seq: 12, userSeq: 5, prompt: '第一条提问：初始化项目', files: { count: 0, restorable: 0 } },
-        ],
-      }),
-    };
-  }
-  throw new Error(`unexpected route ${route}`);
-};
-
-const forkCalls = [];
-const opened = [];
-const sessionsService = {
-  fork: async (request) => {
-    forkCalls.push(request);
-    return childId;
-  },
-};
-const workspaceService = {
-  openSession: (target) => opened.push(target),
-};
-services.sessions = sessionsService;
-services.uiWorkspace = workspaceService;
-const props = {
-  sessionId: 'session-parent-1',
-  turn: { turn: 3, end: { seq: 12 } },
-  seq: 12,
-  useAccess: () => true,
-  ctx: {
-    get: (name) => {
-      if (name === 'sessions') return sessionsService;
-      if (name === 'uiWorkspace') return workspaceService;
-      return undefined;
-    },
-  },
-};
-
-// No target -> nothing renders.
-react.resetCursor();
-const emptyTree = registration.component({ ...props, turn: undefined, seq: undefined });
-assert.deepEqual(findAll(emptyTree, (node) => node.type === 'button'), []);
-
-react.resetCursor();
-let tree = registration.component(props);
-let triggers = findAll(tree, (node) => node.type === 'button'
-  && String(node.props.className ?? '').includes('dshSessionRewindTrigger'));
-assert.equal(triggers.length, 1);
-assert.match(textOf(tree), /session-rewind\.button\.label/u);
-
-// Open the panel: it must ask the Host for a plan first.
-triggers[0].props.onClick();
-await flush();
-assert.equal(fetchCalls.length, 1);
-assert.deepEqual(fetchCalls[0].body, { sessionId: 'session-parent-1', turn: 3 });
-assert.equal(fetchCalls[0].route, '/api/session-rewind.plan');
-
-react.resetCursor();
-tree = registration.component(props);
-assert.match(textOf(tree), /session-rewind\.panel\.title/u);
-assert.match(textOf(tree), /app\/login\.tsx/u);
-assert.match(textOf(tree), /app\/new\.css/u);
-assert.match(textOf(tree), /session-rewind\.panel\.deleteOne/u);
-
-// Rewind: restore the checked files, fork at the Turn boundary, seed the draft
-// and open the child session.
-const primary = findAll(tree, (node) => node.type === 'button'
-  && String(node.props.className ?? '').includes('dshSessionRewindPrimary'));
-assert.equal(primary.length, 1);
-primary[0].props.onClick();
-await flush(12);
-
-assert.equal(fetchCalls.length, 2);
-assert.equal(fetchCalls[1].route, '/api/session-rewind.restore');
-assert.deepEqual(fetchCalls[1].body.paths, ['E:/work/app/login.tsx', 'E:/work/app/new.css']);
-assert.deepEqual(forkCalls, [{ sessionId: 'session-parent-1', atSeq: 12, increaseTitle: true }]);
-assert.deepEqual(opened, [childId]);
-const draft = JSON.parse(store.get(`dsh.conversation.${childId}`));
-assert.deepEqual(draft.draft, { text: '把登录页改成深色主题', references: [] });
-
-// Unchecking a file keeps it out of the restore request.
-react.resetCursor();
-tree = registration.component(props);
-const boxes = findAll(tree, (node) => node.type === 'input');
-assert.equal(boxes.length, 2);
-boxes[0].props.onChange();
-react.resetCursor();
-tree = registration.component(props);
-const restoreOnly = findAll(tree, (node) => node.type === 'button'
-  && String(node.props.children ?? '') === 'session-rewind.action.restore');
-assert.equal(restoreOnly.length, 1);
-fetchCalls.length = 0;
-restoreOnly[0].props.onClick();
-await flush(10);
-assert.deepEqual(fetchCalls[0].body.paths, ['E:/work/app/new.css']);
-assert.equal(forkCalls.length, 1);
-//#endregion
-
-//#region failure paths
-// A session with no fork boundary renders nothing at all.
-react.resetCursor();
-const noBoundary = registration.component({ ...props, turn: { turn: 3 }, seq: undefined });
-assert.deepEqual(findAll(noBoundary, (node) => node.type === 'button'), []);
-//#endregion
-
-//#region retired header entry
-// The session-header entry is no longer registered: the rewind control lives on
-// the user's own message row, so there must be exactly one place to click.
+//#region bridge host and source contracts
+assert.equal(registrations.length, 1);
+assert.equal(registration.options.name, 'conversation.chat.turnTail');
+assert.equal(registration.options.id, 'session-rewind');
 assert.equal(registrations.some((entry) => entry.options.name === 'conversation.session.header.actions'), false);
+react.resetCursor();
+const hostNode = registration.component({ sessionId: 'session-parent-1', ctx: context, tr: (key) => key });
+react.beginRender(hostNode.type);
+assert.equal(hostNode.type(hostNode.props), null);
+const sourceText = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+assert.match(sourceText, /function createRowBridge/);
+assert.match(sourceText, /querySelector\('\[data-clock\]'\)/);
+assert.match(sourceText, /activeTurns/);
+assert.match(sourceText, /runEdit = async/);
+assert.match(sourceText, /message\.editTitle/);
+assert.match(sourceText, /const openPopover = \(anchor, seq, notice, turn/u);
+assert.match(sourceText, /runRewind\(seq, false, notice, turn\)/u);
+assert.match(sourceText, /runRewind\(seq, true, notice, turn\)/u);
+assert.equal(sourceText.includes('conversation.session.header.actions'), false);
 //#endregion
-
-// --- popover wiring --------------------------------------------------------
-// v1.3.1 shipped a popover whose option callbacks referenced a `turn` the
-// enclosing function never declared. That throws inside a DOM listener, which the
-// browser swallows: clicking a control did nothing at all. Pin the wiring.
-{
-  const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
-  assert.match(source, /const openPopover = \(anchor, seq, notice, turn/u);
-  assert.match(source, /runRewind\(seq, false, notice, turn\)/u);
-  assert.match(source, /runRewind\(seq, true, notice, turn\)/u);
-}
 
 console.log('client smoke: all assertions passed');

@@ -1,62 +1,13 @@
 # dsh-session-rewind
 
-[中文](README.md) | English
+A DSH Web plugin with one always-visible action beside each user message. Completed Turns show ↶ for in-place rewind; active or stopped Turns show a pencil for pause-and-edit.
 
-A DSH Web plugin that puts **Rewind** on every finished Turn: a per-Turn control
-in the Chat timeline plus one entry in the Session header, branching the
-conversation at that Turn and restoring the files that Turn changed.
+## Behavior
 
-In DSH Web, rewind to any **finished Turn**: every Turn in the Chat timeline has a
-`Rewind` button, and the Session header adds one more entry point that lists every
-rewindable Turn of the session. Rewinding forks a new session at that Turn and
-restores the files that Turn changed.
-
-## Two entry points
-
-| Where | What it does |
-| --- | --- |
-| The ↶ in the Session header (`conversation.session.header.actions`) | Lists **every** finished Turn of this session (Turn N + prompt preview + file count); pick with ↑↓, confirm with Enter, go back with Esc. After picking a Turn, choose "Rewind conversation only" or "Rewind and restore N files" — no need to scroll back to that Turn. |
-| `Rewind` at the end of each finished Turn (`conversation.chat.turnTail`) | Rewinds that one Turn directly; the panel lets you check the files to restore and choose "Rewind conversation" or "Restore files only". |
-
-## What it does
-
-Choosing a Turn opens a small panel with two independent halves:
-
-1. **Rewind the conversation.** A committed Turn cannot be edited in place: the
-   session log is append-only and branching is the supported operation. The
-   panel therefore creates a *new* session that ends exactly at that Turn
-   (`sessions.fork` with the Turn's `turn/end` seq), opens it, and pre-fills its
-   composer with the Turn's original user prompt so you can edit it and send it
-   again. The original session is left untouched.
-2. **Restore the files that Turn changed.** While a Turn runs, every file the
-   model creates or rewrites is captured *before* the mutation and stored as a
-   content-addressed blob. The panel lists those files; the checked ones are put
-   back to their pre-Turn content (a file the Turn created is removed).
-
-The two halves can be used together (`Rewind conversation`) or separately
-(`Restore files only`).
-
-### Why a fork instead of an in-place rewind
-
-The community plugin [`SiriLee/dsh-rewind`](https://github.com/SiriLee/dsh-rewind)
-offers an **in-place rewind** (inside the same session it moves the
-model-visible surface back to an earlier user message by appending a
-`surfaceOp: replace` marker). We borrowed its **entry points and interaction**
-(a ↶ next to each message/Turn, a mode picker, a file impact list,
-↑↓/Enter/Esc, a header candidate list) but deliberately did **not** adopt its
-in-place rollback, because:
-
-- An in-place rewind needs more than an appended marker: the front end must also
-  hide the rolled-back rows, and DSH exposes no extension point for that. The
-  reference plugin does it by wrapping the private `uiConversation.views`
-  registry, and its own source comments say *"The seam is private … not an
-  extension point"* — it breaks with version upgrades.
-- `sessions.fork` is the branching capability DSH officially gives the UI — the
-  built-in "branch in new chat" button uses it — so it is stable across upgrades
-  and naturally satisfies "context truncated + editable + resendable".
-
-If you would rather have an in-place rewind (same session, no new session), you
-can install `dsh-rewind-plugin` separately; the two do not conflict.
+- **Completed Turn ↶**: withdraws that message and later model context, optionally restores captured filesystem changes, and puts the original prompt back in the composer.
+- **Active or stopped Turn pencil**: stops generation, withdraws the original prompt without the rewind dialog, and returns it to the composer for editing. Sending the edit leaves only the new version visible to the model and in Chat.
+- The event log remains append-only. Hidden rows are a presentation layer; the trajectory remains inspectable.
+- File restoration only covers mutations captured through DSH filesystem hooks.
 
 ## Install
 
@@ -80,7 +31,7 @@ This machine (profile `desktop`) already has that index source written into
 
 | half | mechanism |
 | --- | --- |
-| conversation | Client `sessions.fork({ sessionId, atSeq })` + `uiWorkspace.openSession`, the same idiom as the built-in branch button; the draft is pre-seeded through the Conversation store's per-session `localStorage` key so the composer already holds the original prompt |
+| conversation | Client DOM bridge on the user-message row; completed Turns use the in-place surface replace route, while active/stopped Turns use the edit route and composer facade |
 | files (capture) | `fs/write-intent` / `fs/edit-intent` waterfalls (`{ prepend: true }`), with the tool execution mapped back to its Session through a `tools/pre-execute` `WeakMap` — the same coupling `workspace-changes` uses |
 | files (restore) | text pre-images through the `fs` service (path resolution, locks, version guard); binary pre-images and deletions through Node, on the archive's own recorded absolute path |
 
@@ -124,18 +75,17 @@ list). It is read-only and never exposes session content.
 - Capture starts with the Turn that is open when the plugin mounts: a Turn
   already running at install time is recovered from the live log tail, but a
   plugin loaded later than the Turn's first write cannot see earlier mutations.
-- The naming and wording of the panel follow the DSH locale service; the bundled
-  dictionaries are Chinese and English.
+- The plugin-list metadata and client notices are localized in Chinese and English.
 
 ## Tests
 
-The package ships the suites used to verify it; they need no browser and no
-profile:
+The shipped suites need no browser or profile:
 
 ```
-node test/selftest.mjs      # Turn location, prompt extraction, archive, restorer
-node test/route-smoke.mjs   # all routes, their fences, and path allow-listing
-node test/client-smoke.mjs  # the Web half: both slots, panel, candidate list, fork, draft
+node test/selftest.mjs
+node test/edit-smoke.mjs
+node test/route-smoke.mjs
+node test/client-smoke.mjs
 ```
 
 ## Package layout
@@ -143,11 +93,13 @@ node test/client-smoke.mjs  # the Web half: both slots, panel, candidate list, f
 | file | role |
 | --- | --- |
 | `cordis.patch.yml` | inserts the `session-rewind` plugin row |
-| `src/index.js` | Host entry, re-exports `apply` / `inject` / `name` |
-| `src/plugin.js` | Host wiring: Turn tracking, mutation capture, the four routes |
-| `src/lib/archive.js` | durable pre-Turn archive, pruning, blob store |
-| `src/lib/restore.js` | putting one captured file back |
-| `src/lib/route.js` | routes and the `/api` trust fence |
-| `lib/client.js` | Web half: the turn-tail control, the header entry, the panel |
-| `locale/*.json` | `meta.title` / `meta.description` for the plugin list |
-| `index.json` | format-1 plugin-market index (see `docs/publishing.md`) |
+| `src/index.js` | Host entry |
+| `src/plugin.js` | Host wiring, capture hooks and API routes |
+| `src/lib/archive.js` | durable pre-Turn archive and blob store |
+| `src/lib/inplace.js` | active edit and in-place rewind execution |
+| `src/lib/restore.js` | restore one captured file |
+| `src/lib/route.js` | HTTP routes and trust fence |
+| `src/lib/surface.js` | surface planning, markers and withdrawn-turn calculation |
+| `lib/client.js` | hidden bridge host and per-message edit/rewind control |
+| `locale/*.json` | plugin-list metadata |
+| `index.json` | format-1 plugin-market index |

@@ -1,73 +1,16 @@
 # dsh-session-rewind · 会话回退
 
-A DSH Web plugin that puts **Rewind** on every finished Turn: a per-Turn control
-in the Chat timeline plus one entry in the Session header, branching the
-conversation at that Turn and restoring the files that Turn changed.
+A DSH Web plugin that adds an always-visible action beside each user message.
+Completed Turns can be rewound in place; active or stopped Turns can be paused and edited.
 
-在 DSH Web 里回退到任意**已完成的回合**：对话时间线的每个回合旁有 `回退` 按钮，会话标题栏还有一个
-总入口，列出本会话所有可回退的回合；回退会从该回合处分叉出新会话，并把该回合改动过的文件恢复原状。
+DSH Web 每条用户消息旁常显一个操作按钮：已完成回合显示 ↶，点击可就地回退；未完成或已停止回合显示铅笔，点击会暂停并撤回旧消息，将原文放回输入框供编辑重发。
 
-## 两个入口 · Two entry points
+## 操作
 
-| 位置 | 作用 |
-| --- | --- |
-| **你发出的那条消息旁的 ↶**（唯一入口，常显） | 点开选「仅回退对话」或「回退对话并恢复文件」。**就地回退**：这条消息及之后的对话内容从模型上下文里撤回，原话立刻回到本会话输入框，改完直接重发。回合结束（含自动终止/停止）后按钮自动出现。 |
-
-**核心行为（就地回退）**：选中你某条消息 → 追加一条 `surfaceOp: replace` 标记，把模型可见的
-surface 从这条消息起整体撤回 → 被撤回的行从对话里消失（轨迹面板仍可查，日志从未删改）→
-这条消息的**原文放进输入框**，你可以修改后重新发送。会话不换、不新建。
-
-## What it does · 功能
-
-Choosing a Turn opens a small panel with two independent halves:
-
-1. **Rewind the conversation.** A committed Turn cannot be edited in place: the
-   session log is append-only and branching is the supported operation. The
-   panel therefore creates a *new* session that ends exactly at that Turn
-   (`sessions.fork` with the Turn's `turn/end` seq), opens it, and pre-fills its
-   composer with the Turn's original user prompt so you can edit it and send it
-   again. The original session is left untouched.
-2. **Restore the files that Turn changed.** While a Turn runs, every file the
-   model creates or rewrites is captured *before* the mutation and stored as a
-   content-addressed blob. The panel lists those files; the checked ones are put
-   back to their pre-Turn content (a file the Turn created is removed).
-
-The two halves can be used together (`回退对话`) or separately
-(`仅恢复文件`).
-
-选中某个回合后：
-
-1. **回退对话**：会话日志是只追加的，所以“回退”= 在该回合的 `turn/end` 处**分叉**出一个新会话并打开它，
-   同时把该回合原本的用户输入写回新会话的输入框，你可以直接修改后重新发送；原会话完全不动。
-2. **恢复文件**：该回合运行期间，每个被创建或改写的文件都会在**写入前**抓取一份原始字节存档。
-   面板会列出这些文件，勾选的会被恢复为修改前的内容；该回合新建的文件会被删除。
-
-### 就地撤回 vs 分叉：两个都给了
-
-- **就地回退（主）**：同一会话内撤回，靠一条 `surfaceOp: replace` 标记实现——这是 DSH 自己
-  压缩（compaction）用的同一机制，日志只追加、不删改。
-- **分叉（次）**：`sessions.fork` 在该回合 `turn/end` 处新建一份会话，内置「在新对话中分支」
-  按钮用的就是它，升级最稳。
-
-唯一的妥协在**前端隐藏被撤回的行**：DSH 没有为用户消息提供动作槽，也没有公开「隐藏某段行」
-的接口，所以这里按参考插件 `SiriLee/dsh-rewind` 的做法在前端补：给每条用户消息注入一个 ↶
-（锚点取行内最后一个按钮的父节点），回退后按 `data-chat-turn` 隐藏该行及之后的行。全部特性
-检测、卸载即还原；DSH 若在未来提供动作槽，这里会切成槽位实现。
-
-### 参考插件为什么没有全盘照搬
-
-社区里的 [`SiriLee/dsh-rewind`](https://github.com/SiriLee/dsh-rewind) 提供**就地回退**（同一会话内
-把模型可见 surface 切回更早的用户消息，靠追加一条 `surfaceOp: replace` 标记实现）。我们借鉴了它的
-**入口与交互**（每条消息/每轮旁的 ↶、模式选择、文件影响清单、↑↓/Enter/Esc、标题栏候选列表），但**没有**
-采用它的就地撤回，原因是：
-
-- 就地撤回不仅要追加标记，还必须在**前端**把被撤回的行隐藏起来，而 DSH 没有为此提供扩展点——
-  参考插件是通过包装私有的 `uiConversation.views` registry 做到的，其源码自己注明
-  *"The seam is private … not an extension point"*，随版本升级会破。
-- `sessions.fork` 是 DSH 给 UI 的官方分支能力（内置「在新对话中分支」按钮用的就是它），
-  升级稳定，且天然满足“上下文被截断 + 可改可重发”。
-
-如果你更希望要就地撤回（同一会话、不产生新会话），可以另装 `dsh-rewind-plugin`；两者不冲突。
+- **已完成回合 ↶**：撤回该消息及之后的上下文，原文回到输入框；可选同时恢复本插件记录到的文件改动。
+- **未完成/已停止回合铅笔**：停止生成，撤回原消息并将原文放回输入框；编辑后发送，界面与模型上下文只保留新版本。
+- 对话日志只追加 marker，不物理删除事件；已撤回的消息仍可在轨迹中检查。
+- 文件恢复只覆盖通过 DSH filesystem mutation hooks 捕获的变更；shell/git 和直接绕开这些 hooks 的写入不在保证范围内。
 
 ## Install · 安装
 
@@ -88,7 +31,7 @@ The two halves can be used together (`回退对话`) or separately
 
 | half | mechanism |
 | --- | --- |
-| conversation | Client `sessions.fork({ sessionId, atSeq })` + `uiWorkspace.openSession`, the same idiom as the built-in branch button; the draft is pre-seeded through the Conversation store's per-session `localStorage` key so the composer already holds the original prompt |
+| conversation | Client DOM bridge on the user-message row; completed Turns use the in-place surface replace route, while active/stopped Turns use the edit route and composer facade |
 | files (capture) | `fs/write-intent` / `fs/edit-intent` waterfalls (`{ prepend: true }`), with the tool execution mapped back to its Session through a `tools/pre-execute` `WeakMap` — the same coupling `workspace-changes` uses |
 | files (restore) | text pre-images through the `fs` service (path resolution, locks, version guard); binary pre-images and deletions through Node, on the archive's own recorded absolute path |
 
@@ -132,8 +75,7 @@ list). It is read-only and never exposes session content.
 - Capture starts with the Turn that is open when the plugin mounts: a Turn
   already running at install time is recovered from the live log tail, but a
   plugin loaded later than the Turn's first write cannot see earlier mutations.
-- The naming and wording of the panel follow the DSH locale service; the bundled
-  dictionaries are Chinese and English.
+- The plugin-list metadata and client notices are localized in Chinese and English.
 
 ## Tests · 测试
 
@@ -141,9 +83,10 @@ The package ships the suites used to verify it; they need no browser and no
 profile:
 
 ```
-node test/selftest.mjs      # Turn location, prompt extraction, archive, restorer
-node test/route-smoke.mjs   # all routes, their fences, and path allow-listing
-node test/client-smoke.mjs  # the Web half: both slots, panel, candidate list, fork, draft
+node test/selftest.mjs       # surface planning, archive and restore
+node test/edit-smoke.mjs     # active edit cancellation and surface replacement
+node test/route-smoke.mjs    # routes, trust fences and path allow-listing
+node test/client-smoke.mjs   # single bridge host and message action wiring
 ```
 
 ## Package layout
@@ -151,11 +94,13 @@ node test/client-smoke.mjs  # the Web half: both slots, panel, candidate list, f
 | file | role |
 | --- | --- |
 | `cordis.patch.yml` | inserts the `session-rewind` plugin row |
-| `src/index.js` | Host entry, re-exports `apply` / `inject` / `name` |
-| `src/plugin.js` | Host wiring: Turn tracking, mutation capture, the four routes |
-| `src/lib/archive.js` | durable pre-Turn archive, pruning, blob store |
-| `src/lib/restore.js` | putting one captured file back |
-| `src/lib/route.js` | routes and the `/api` trust fence |
-| `lib/client.js` | Web half: the turn-tail control, the header entry, the panel |
-| `locale/*.json` | `meta.title` / `meta.description` for the plugin list |
-| `index.json` | format-1 plugin-market index (see `docs/publishing.md`) |
+| `src/index.js` | Host entry |
+| `src/plugin.js` | Host wiring, capture hooks and API routes |
+| `src/lib/archive.js` | durable pre-Turn archive and blob store |
+| `src/lib/inplace.js` | active edit and in-place rewind execution |
+| `src/lib/restore.js` | restore one captured file |
+| `src/lib/route.js` | HTTP routes and trust fence |
+| `src/lib/surface.js` | surface planning, markers and withdrawn-turn calculation |
+| `lib/client.js` | hidden bridge host and per-message edit/rewind control |
+| `locale/*.json` | plugin-list metadata |
+| `index.json` | format-1 plugin-market index |
