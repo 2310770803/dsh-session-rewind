@@ -185,6 +185,7 @@ const inplaceHandler = createInplaceHandler({
     executed.push({ id, seq, restoreFiles });
     return { markerSeq: 50, targetSeq: seq, prompt: 'make it dark', turn: 2, hiddenFromSeq: 11, hiddenFromTurn: 2 };
   },
+  edit: async (id, seq) => ({ markerSeq: 51, targetSeq: seq, prompt: 'make it dark', turn: 2, hiddenFromTurn: 2, hiddenTurns: [2] }),
   trustedHosts: () => [],
 });
 
@@ -203,6 +204,12 @@ assert.deepEqual(JSON.parse(res.body), {
   ok: true, markerSeq: 50, targetSeq: 11, prompt: 'make it dark', turn: 2, hiddenFromSeq: 11, hiddenFromTurn: 2,
 });
 assert.deepEqual(executed, [{ id: sessionId, seq: 11, restoreFiles: true }]);
+
+// edit replaces the original without using restoreFiles
+res = response();
+await inplaceHandler(request({ sessionId, seq: 11, edit: true }), res);
+assert.equal(res.status, 200);
+assert.deepEqual(JSON.parse(res.body), { ok: true, edit: true, markerSeq: 51, targetSeq: 11, prompt: 'make it dark', turn: 2, hiddenFromTurn: 2, hiddenTurns: [2] });
 
 // a planning refusal is a 409 with a code, not a 500
 executed.length = 0;

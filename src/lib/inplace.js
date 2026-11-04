@@ -213,6 +213,7 @@ export async function executeInPlace({
     prompt: plan.prompt,
     turn: plan.turn,
     hiddenFromSeq: hidden,
+    hiddenFromTurn: plan.turn,
     hiddenTurns,
     ...(restore === undefined ? {} : { restore }),
   };

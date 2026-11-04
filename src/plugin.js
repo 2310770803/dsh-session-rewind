@@ -531,7 +531,7 @@ export function apply(ctx) {
           candidates.push({
             turn: end.turn,
             seq: end.seq,
-            edit: end.reason !== 'completed',
+            edit: end.reason !== undefined && end.reason !== 'completed',
             userSeq: userMessage === null ? null : userMessage.seq,
             prompt: userPromptOf(events, end.turn),
             files: {
