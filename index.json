@@ -26,8 +26,8 @@
         "zh": "会话回退"
       },
       "description": {
-        "en": "Adds a rewind control to every finished Turn plus one entry in the session header. Pick a Turn to branch the conversation there into a new session, put that Turn's original prompt back in the composer so you can edit and resend it, and restore the workspace files that Turn changed to their pre-Turn content.",
-        "zh": "在未完成回合显示铅笔按钮，暂停后可直接编辑；已完成回合显示回退按钮。"
+        "en": "Shows an edit button for unfinished turns and a rewind button for completed turns. Editing pauses the turn and puts the original message back in the composer.",
+        "zh": "未完成回合显示编辑按钮，完成回合显示回退按钮。点击编辑可暂停并将原消息放回输入框。"
       },
       "icon": "https://raw.githubusercontent.com/2310770803/dsh-session-rewind/main/icon.svg",
       "author": "2310770803",
@@ -52,12 +52,12 @@
       },
       "versions": [
         {
-          "version": "1.5.2",
-          "publishTimestamp": 1793772666,
+          "version": "1.5.3",
+          "publishTimestamp": 1793772677,
           "source": {
             "type": "git",
             "url": "https://github.com/2310770803/dsh-session-rewind",
-            "commit": "cff9651b02f94290a282428ce5df653e9b18da62"
+            "commit": "ae8b72493e04312b068b3d4588993162333f9f84"
           }
         }
       ]
