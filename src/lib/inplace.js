@@ -133,6 +133,7 @@ export async function executeInPlace({
   seq,
   restoreTurns,
   readEvents,
+  cancel = true,
   timeoutMs = IDLE_TIMEOUT_MS,
 }) {
   const agent = liveAgentOf(ctx, sessionId);
@@ -148,8 +149,10 @@ export async function executeInPlace({
     throw error;
   }
 
-  // A running Turn must stop before its surface can be cut.
-  if (agent.status !== 'idle') {
+  // A running Turn must stop before its surface can be cut. Editing an older
+  // Turn must NOT stop the Turn that is currently streaming — only the Turn the
+  // target belongs to is ours to cancel.
+  if (cancel && agent.status !== 'idle') {
     try {
       agent.cancel?.({ kind: 'user' }, { keepInbox: true });
     } catch {
@@ -220,8 +223,29 @@ export async function executeInPlace({
 
 
 /** Stop an active Turn and return its original user text for editing. */
-export async function executeEdit({ ctx, sessionId, seq, readEvents, timeoutMs = IDLE_TIMEOUT_MS }) {
-  // Editing is a replacement, not a second prompt: use the same append-only
-  // surface replace as rewind, but do not restore files or show a rewind choice.
-  return executeInPlace({ ctx, sessionId, seq, restoreTurns: undefined, readEvents, timeoutMs });
+export async function executeEdit({ ctx, sessionId, seq, activeTurn, readEvents, timeoutMs = IDLE_TIMEOUT_MS }) {
+  // Editing is a replacement, not a second prompt: the same append-only surface
+  // replace as rewind, without file restore. Only a Turn that is still open needs
+  // cancelling; an already-ended (stopped) Turn is edited without touching the
+  // generation that may currently be running in another Turn.
+  const turnOfSeq = await turnAtSeq(sessionId, seq, readEvents);
+  const ownsRunningTurn = Number.isInteger(activeTurn) && Number.isInteger(turnOfSeq)
+    ? activeTurn === turnOfSeq
+    : Number.isInteger(activeTurn) === false;
+  return executeInPlace({ ctx, sessionId, seq, restoreTurns: undefined, readEvents, cancel: ownsRunningTurn, timeoutMs });
+}
+
+/** The Turn number that contains `seq`, read from the committed log. */
+async function turnAtSeq(sessionId, seq, readEvents) {
+  try {
+    const events = typeof readEvents === 'function' ? await readEvents(sessionId) : [];
+    let inside = null;
+    for (const event of events) {
+      if (event?.seq > seq) break;
+      if (event?.type === 'turn/start' && Number.isInteger(event.data?.turn)) inside = event.data.turn;
+    }
+    return inside;
+  } catch {
+    return null;
+  }
 }

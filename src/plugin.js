@@ -481,7 +481,13 @@ export function apply(ctx) {
 
       const describeInPlaceFor = (sessionId, seq) => describeInPlace(liveSession(sessionId), seq);
 
-      const executeEditFor = (sessionId, seq) => executeEdit({ ctx, sessionId, seq, readEvents: (id) => readEvents(ctx, id) });
+      const executeEditFor = (sessionId, seq) => executeEdit({
+        ctx,
+        sessionId,
+        seq,
+        activeTurn: openTurns.get(sessionId) ?? openTurnOf(liveAgentOf(ctx, sessionId)?.session),
+        readEvents: (id) => readEvents(ctx, id),
+      });
       const executeInPlaceFor = (sessionId, seq, restoreFiles) => executeInPlace({
         ctx,
         sessionId,
